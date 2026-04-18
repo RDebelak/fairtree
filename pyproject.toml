@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "fairtree"
+dynamic = ["version"]
+description = "Subgroup fairness auditing of machine learning models with bias-variance decomposition"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Rudolf Debelak", email = "rudolf.debelak@epfl.ch" },
+]
+maintainers = [
+    { name = "Rudolf Debelak", email = "rudolf.debelak@epfl.ch" },
+]
+keywords = [
+    "algorithmic fairness",
+    "model auditing",
+    "bias-variance decomposition",
+    "permutation test",
+    "fluctuation test",
+    "subgroup analysis",
+    "machine learning",
+    "fairness",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.22",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.3",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/RDebelak/fairtree"
+Repository = "https://github.com/RDebelak/fairtree"
+Issues = "https://github.com/RDebelak/fairtree/issues"
+# Paper = "https://arxiv.org/abs/XXXX.XXXXX"   # fill in after arXiv upload
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["fairtree"]
+
+[tool.hatch.version]
+path = "fairtree/__init__.py"
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "N803",   # allow lowercase 'X' etc. in ML-style signatures
+    "N806",   # allow capital variable names in numerics (P, X, W, ...)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802"]   # allow flexible test-function naming
+
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
