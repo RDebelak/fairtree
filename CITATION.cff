@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: "If you use FairTree in your research, please cite both the software and the accompanying paper."
+title: "FairTree: Subgroup Fairness Auditing of Machine Learning Models with Bias-Variance Decomposition"
+type: software
+version: 0.1.0
+date-released: "2026-04-18"
+license: Apache-2.0
+repository-code: "https://github.com/RDebelak/fairtree"
+authors:
+  - given-names: Rudolf
+    family-names: Debelak
+    email: rudolf.debelak@epfl.ch
+    orcid: "https://orcid.org/0000-0001-8900-2106"
+    affiliation: "University of Zurich, EPFL"
+keywords:
+  - algorithmic fairness
+  - model auditing
+  - bias-variance decomposition
+  - permutation test
+  - fluctuation test
+  - subgroup analysis
+  - machine learning
+abstract: >-
+  FairTree is a Python package for subgroup fairness auditing of machine
+  learning models. It scans covariates of mixed type (continuous,
+  ordinal, binary, unordered categorical) for subgroups where model
+  prediction error changes systematically, distinguishing shifts in bias
+  from shifts in variance. Two statistical variants are provided: a
+  score-based fluctuation test using the Brownian bridge, and a
+  non-parametric permutation test with proper maximally-selected
+  statistic correction.
+preferred-citation:
+  type: conference-paper
+  title: "FairTree: Subgroup Fairness Auditing of Machine Learning Models with Bias-Variance Decomposition"
+  authors:
+    - given-names: Rudolf
+      family-names: Debelak
+      email: rudolf.debelak@epfl.ch
+      orcid: "https://orcid.org/0000-0001-8900-2106"
+      affiliation: "University of Zurich, EPFL"
+  year: 2026
+  conference:
+    name: "2026 ACM Conference on Fairness, Accountability, and Transparency (FAccT '26)"
+  publisher:
+    name: ACM
+  # doi: 10.1145/XXXXXXX.XXXXXXX   # fill in when available
