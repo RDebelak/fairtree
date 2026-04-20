@@ -282,3 +282,6 @@ def permutation_test_continuous(
         variance_diff=metrics_a.variance - metrics_b.variance,
         split_point=float(best_split),
     )
+
+# Tell pytest this isn't a test function, despite the ``test_`` prefix.
+test_single_binary_covariate.__test__ = False
