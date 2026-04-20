@@ -27,7 +27,6 @@ import pandas as pd
 from scipy.stats import kstwobign
 
 from .metrics import (
-    BiasVarianceMetrics,
     calculate_metrics_from_residuals,
 )
 
