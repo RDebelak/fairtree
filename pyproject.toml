@@ -76,7 +76,7 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B"]
+select = ["E", "F", "W"]
 ignore = [
     "E501",   # line length handled by formatter
     "N803",   # allow lowercase 'X' etc. in ML-style signatures
