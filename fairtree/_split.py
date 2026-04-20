@@ -315,3 +315,6 @@ def test_mixed_covariates(
 
     results.sort(key=lambda r: r.corrected_p_value)
     return results
+
+# Tell pytest this isn't a test function, despite the ``test_`` prefix.
+test_mixed_covariates.__test__ = False
