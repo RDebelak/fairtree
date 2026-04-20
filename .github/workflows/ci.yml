@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ruff
-        run: pip install "ruff>=0.3"
+        run: pip install "ruff>=0.3,<0.7"
       - name: Run ruff
         run: ruff check fairtree/ tests/
 
