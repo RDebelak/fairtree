@@ -92,11 +92,14 @@ limit. Separate sub-tests detect shifts in bias (mean residual) and in
 variance (squared centered residual); they are combined with Bonferroni.
 Complexity is O(n log n).
 
-**Permutation test.** A non-parametric alternative that finds the
-decile split maximizing the between-group MSE difference, then builds
-the null distribution by re-optimizing the split within each permuted
-sample. This correctly handles the maximally-selected statistic problem
-and so the permutation p-value is statistically valid. Complexity is
+**Permutation test.** A non-parametric alternative that finds the split
+maximizing the between-group MSE difference, then builds the null
+distribution by re-optimizing the split within each permuted sample.
+For continuous and ordinal covariates, all split points between
+consecutive unique values are considered by default. For unordered
+categorical covariates, categories are ordered by mean loss and the
+CART-style partitions along that order are evaluated. This handles the
+maximally-selected statistic problem. Complexity is
 O(n_splits × n_permutations). Recommended for small samples or as a
 confirmatory test.
 
@@ -116,13 +119,15 @@ result is one of ``"None"``, ``"Bias"``, ``"Variance"``, or ``"Both"``.
 | `continuous`  | ✓           | ✓           |
 | `ordinal`     | ✓           | ✓           |
 | `binary`      | ✓           | ✓           |
-| `categorical` | ✓           | not yet     |
+| `categorical` | ✓           | ✓           |
 
 For unordered categorical covariates, FairTree uses **sample splitting**:
 the category ordering is learned on a 50% training half and the
 fluctuation test is run on the held-out test half. This prevents the
 same data from being used to both order the categories and test for a
 shift along that order, which would otherwise inflate the Type I error.
+For the permutation path, unordered categories use the CART-style
+partitioning approach described in the paper.
 
 ### Multiple-testing correction
 
@@ -150,6 +155,8 @@ Lower-level entry points:
   (returns `FluctuationTestResult`).
 - `permutation_test_continuous(cov, y_true, y_pred, ...)` — permutation
   test for one continuous or ordinal covariate.
+- `permutation_test_categorical(cov, y_true, y_pred, ...)` — permutation
+  test for one unordered categorical covariate.
 - `test_single_binary_covariate(cov, residuals, ...)` — permutation test
   for one binary covariate.
 - `score_based_test_from_residuals(r_a, r_b, alpha)` — two-group
@@ -165,15 +172,12 @@ Corrections:
 
 ## Limitations (v0.1)
 
-- `build_fairtree` currently performs one split plus optionally one
-  further split on the larger child. Full recursive partitioning is a
-  planned extension.
-- Tree visualization skips categorical covariates, since
-  `TreeNode.split_value` is a numeric threshold. Categorical results
-  are still fully reported in the `SplitResult` table. Set-valued tree
-  splits are on the roadmap.
-- The permutation path does not yet support categorical covariates.
-  For categorical, use `method="fluctuation"`.
+- `build_fairtree` recursively organizes already-computed
+  `SplitResult` outputs. It does not yet re-run the statistical tests
+  inside each child node.
+- Permutation tests for continuous covariates consider all unique split
+  points by default. For very large samples, use `max_splits` on the
+  lower-level function if an explicit speed approximation is acceptable.
 
 ---
 
