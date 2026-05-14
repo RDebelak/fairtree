@@ -6,6 +6,7 @@ import numpy as np
 
 from fairtree import (
     permutation_test,
+    permutation_test_categorical,
     permutation_test_continuous,
     test_single_binary_covariate,
 )
@@ -96,6 +97,35 @@ def test_permutation_continuous_p_value_smoothing_never_zero():
     )
     assert sr.p_value > 0
     assert sr.p_value <= 1.0 / (100 + 1) + 1e-9  # tight upper bound
+
+
+# ---------------------------------------------------------------------------
+# Categorical permutation test
+# ---------------------------------------------------------------------------
+
+def test_permutation_categorical_detects_bad_category():
+    rng = np.random.default_rng(0)
+    n = 500
+    cov = rng.choice(["N", "S", "E", "W"], n)
+    y_true = rng.normal(0, 1, n)
+    y_pred = y_true + rng.normal(0, 0.3, n) + 1.0 * (cov == "E")
+
+    sr = permutation_test_categorical(
+        cov, y_true, y_pred, "region",
+        n_permutations=300,
+        rng=np.random.default_rng(0),
+    )
+    assert sr is not None
+    assert sr.p_value < 0.05
+    assert sr.group_a_values is not None
+    assert sr.group_a_values == frozenset({"E"}) or "E" not in sr.group_a_values
+
+
+def test_permutation_categorical_rejects_single_level():
+    cov = np.array(["A"] * 20)
+    y_true = np.zeros(20)
+    y_pred = np.zeros(20)
+    assert permutation_test_categorical(cov, y_true, y_pred) is None
 
 
 # ---------------------------------------------------------------------------

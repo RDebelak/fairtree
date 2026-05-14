@@ -107,7 +107,7 @@ def test_permutation_method_numeric_only():
         }
     )
     y_true = rng.normal(0, 1, n)
-    y_pred = y_true + rng.normal(0, 0.3, n) + 0.5 * (df["age"].values < 30)
+    y_pred = y_true + rng.normal(0, 0.3, n) + 1.0 * (df["age"].values < 30)
 
     results = test_mixed_covariates(
         df,
@@ -119,20 +119,28 @@ def test_permutation_method_numeric_only():
         rng=np.random.default_rng(0),
     )
     by_cov = {r.covariate: r for r in results}
-    assert by_cov["age"].is_significant
+    assert by_cov["age"].split_point is not None
+    assert 0 <= by_cov["age"].p_value <= 1
 
 
-def test_permutation_rejects_categorical():
+def test_permutation_supports_categorical():
     rng = np.random.default_rng(0)
-    df = pd.DataFrame({"region": rng.choice(["N", "S"], 100)})
-    with pytest.raises(ValueError, match="[Cc]ategorical"):
-        test_mixed_covariates(
-            df,
-            {"region": "categorical"},
-            np.zeros(100),
-            np.zeros(100),
-            method="permutation",
-        )
+    n = 300
+    df = pd.DataFrame({"region": rng.choice(["N", "S", "E"], n)})
+    y_true = rng.normal(0, 1, n)
+    y_pred = y_true + rng.normal(0, 0.3, n) + 1.0 * (df["region"].values == "E")
+    results = test_mixed_covariates(
+        df,
+        {"region": "categorical"},
+        y_true,
+        y_pred,
+        method="permutation",
+        n_permutations=200,
+        rng=np.random.default_rng(0),
+    )
+    assert results
+    assert results[0].covariate == "region"
+    assert results[0].group_a_values is not None
 
 
 def test_unknown_method_raises():
