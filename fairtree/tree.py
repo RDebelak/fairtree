@@ -3,9 +3,9 @@ Tree construction for FairTree.
 
 Builds a hierarchical summary from per-covariate :class:`SplitResult`
 outputs. The tree is post-hoc: statistical tests are run independently
-on each covariate first, and the tree simply organizes the significant
-covariates into a readable structure, starting with the most
-significant.
+on each covariate first, and the tree recursively organizes the
+significant covariates into a readable structure, starting with the most
+significant remaining split at each node.
 
 Tree building uses the fluctuation-specific fields on ``SplitResult``
 (``bias_split_point``, ``variance_split_point``, ``is_significant``,
@@ -13,9 +13,8 @@ Tree building uses the fluctuation-specific fields on ``SplitResult``
 ``split_point`` but do not populate those fields; they can still be
 plotted as a tabular summary but not visualized as a tree.
 
-Currently supports depth up to 2 (a root split plus one further split
-on the larger child). Full recursive partitioning is a planned
-extension.
+Numeric splits use ``covariate <= split_point``; categorical splits use
+the ``group_a_values`` partition recorded on ``SplitResult``.
 """
 
 from __future__ import annotations
@@ -53,6 +52,9 @@ class TreeNode:
         leaves.
     split_value : float, optional
         Threshold used (left child if ``covariate <= split_value``).
+    split_label : str, optional
+        Human-readable split rule. Used for categorical partitions and
+        visualizations.
     split_direction : {"left", "right"}, optional
         Which side of the parent's split this node corresponds to.
         ``None`` on the root.
@@ -73,6 +75,7 @@ class TreeNode:
     p_value_variance: Optional[float] = None
     split_covariate: Optional[str] = None
     split_value: Optional[float] = None
+    split_label: Optional[str] = None
     split_direction: Optional[str] = None
     is_root: bool = False
     left_child: Optional["TreeNode"] = None
@@ -97,6 +100,28 @@ def _effective_split_point(r: SplitResult) -> Optional[float]:
     return r.split_point
 
 
+def _has_usable_split(r: SplitResult) -> bool:
+    return r.group_a_values is not None or _effective_split_point(r) is not None
+
+
+def _split_mask(
+    covariates_df: pd.DataFrame,
+    result: SplitResult,
+    parent_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    cov_values = covariates_df[result.covariate].values
+    if result.group_a_values is not None:
+        mask_left = np.isin(cov_values, list(result.group_a_values)) & parent_mask
+    else:
+        split_value = _effective_split_point(result)
+        if split_value is None:
+            empty = np.zeros(len(parent_mask), dtype=bool)
+            return empty, empty
+        mask_left = (cov_values <= split_value) & parent_mask
+    mask_right = parent_mask & ~mask_left
+    return mask_left, mask_right
+
+
 def build_fairtree(
     covariates_df: pd.DataFrame,
     residuals: np.ndarray,
@@ -107,12 +132,11 @@ def build_fairtree(
     """
     Build a FairTree from a set of per-covariate test results.
 
-    Greedily splits on the most significant covariate (by corrected
-    p-value, with raw p-value as tie-breaker), then if ``max_depth > 1``
-    applies the next most significant split to the larger of the two
-    children. For fluctuation results the preferred split point is the
-    bias split point when bias is significant, else the variance split
-    point; for other results the primary ``split_point`` is used.
+    Greedily and recursively splits on the most significant remaining
+    covariate (by corrected p-value, with raw p-value as tie-breaker).
+    For fluctuation results the preferred split point is the bias split
+    point when bias is significant, else the variance split point; for
+    categorical results the recorded category partition is used.
 
     Parameters
     ----------
@@ -127,8 +151,8 @@ def build_fairtree(
         results on covariates listed in ``exclude``, and results without
         a usable numeric split point are skipped.
     max_depth : int, default 2
-        Maximum tree depth. 0 = root only, 1 = root split, 2 = one
-        further split on the larger child.
+        Maximum tree depth. 0 = root only, 1 = root split, 2 = root plus
+        one further recursive level, and so on.
     exclude : sequence of str, optional
         Covariate names to exclude from tree construction (for example,
         negative-control features used as null sanity checks).
@@ -156,42 +180,47 @@ def build_fairtree(
         if r.is_significant  # None and False both fall through
         and r.covariate not in exclude_set
         and r.covariate in covariates_df.columns
-        and _effective_split_point(r) is not None
+        and _has_usable_split(r)
     ]
     if not candidates or max_depth < 1:
         return root
 
     candidates.sort(key=lambda r: (r.corrected_p_value, r.p_value))
+    next_id = 1
 
-    # -- Root split --
+    def recurse(
+        node: TreeNode,
+        parent_mask: np.ndarray,
+        depth: int,
+        remaining: list[SplitResult],
+    ) -> None:
+        nonlocal next_id
+        if depth >= max_depth or not remaining:
+            return
+
+        for index, candidate in enumerate(remaining):
+            mask_left, mask_right = _split_mask(covariates_df, candidate, parent_mask)
+            if mask_left.sum() == 0 or mask_right.sum() == 0:
+                continue
+
+            left_id, right_id = next_id, next_id + 1
+            next_id += 2
+            _apply_split(
+                parent=node,
+                covariates_df=covariates_df,
+                residuals=residuals,
+                parent_mask=parent_mask,
+                result=candidate,
+                next_ids=(left_id, right_id),
+            )
+
+            child_remaining = remaining[:index] + remaining[index + 1:]
+            recurse(node.left_child, mask_left, depth + 1, child_remaining)
+            recurse(node.right_child, mask_right, depth + 1, child_remaining)
+            return
+
     root_mask = np.ones(len(residuals), dtype=bool)
-    _apply_split(
-        parent=root,
-        covariates_df=covariates_df,
-        residuals=residuals,
-        parent_mask=root_mask,
-        result=candidates[0],
-        next_ids=(1, 2),
-    )
-
-    # -- Second-level split on the larger child --
-    if max_depth > 1 and len(candidates) > 1:
-        root_cov_values = covariates_df[root.split_covariate].values
-        if root.left_child.n >= root.right_child.n:
-            parent_node = root.left_child
-            parent_mask = root_cov_values <= root.split_value
-        else:
-            parent_node = root.right_child
-            parent_mask = root_cov_values > root.split_value
-
-        _apply_split(
-            parent=parent_node,
-            covariates_df=covariates_df,
-            residuals=residuals,
-            parent_mask=parent_mask,
-            result=candidates[1],
-            next_ids=(3, 4),
-        )
+    recurse(root, root_mask, 0, list(candidates))
 
     return root
 
@@ -205,18 +234,20 @@ def _apply_split(
     next_ids: Tuple[int, int],
 ) -> None:
     """Attach a split to ``parent`` and create its two leaf children."""
-    split_value = _effective_split_point(result)
-    if split_value is None:
+    if not _has_usable_split(result):
         return  # defensive; caller filters this case already
 
     parent.split_covariate = result.covariate
-    parent.split_value = float(split_value)
+    split_value = _effective_split_point(result)
+    parent.split_value = float(split_value) if split_value is not None else None
+    if result.group_a_values is not None:
+        parent.split_label = f"{result.covariate} in {result.group_a_name}"
+    elif parent.split_value is not None:
+        parent.split_label = f"{result.covariate} <= {parent.split_value:.4g}"
     parent.p_value_bias = result.p_bias
     parent.p_value_variance = result.p_variance
 
-    cov_values = covariates_df[result.covariate].values
-    mask_left = (cov_values <= split_value) & parent_mask
-    mask_right = (cov_values > split_value) & parent_mask
+    mask_left, mask_right = _split_mask(covariates_df, result, parent_mask)
 
     parent.left_child = _make_leaf(
         next_ids[0], "left", parent.depth + 1, residuals[mask_left]

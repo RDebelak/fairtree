@@ -10,7 +10,7 @@ fluctuation test and the permutation test.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import FrozenSet, Optional
 
 import numpy as np
 
@@ -88,6 +88,10 @@ class SplitResult:
         is the chosen value on the covariate scale. For fluctuation
         splits this is the bias split point when bias is significant,
         else the variance split point.
+    group_a_values : frozenset, optional
+        Original categorical values assigned to side A of a categorical
+        split. When populated, tree construction uses membership in this
+        set instead of a numeric threshold.
     bias_split_point, variance_split_point : float, optional
         Split points chosen by the bias and variance fluctuation
         sub-tests respectively (fluctuation only).
@@ -118,6 +122,7 @@ class SplitResult:
     variance_diff: float
     # -- Primary split point (both methods, when applicable) --
     split_point: Optional[float] = None
+    group_a_values: Optional[FrozenSet[object]] = None
     # -- Fluctuation-only extras --
     bias_split_point: Optional[float] = None
     variance_split_point: Optional[float] = None
@@ -137,10 +142,26 @@ class SplitResult:
 
         Returns
         -------
-        {"bias", "variance", "both"}
-            Based on the relative magnitudes of ``bias_diff`` and
-            ``variance_diff``.
+        {"bias", "variance", "both", "neither", "bias_only", "variance_only"}
+            For score-based results with component p-values, returns the
+            significance-based labels used by the reference simulation
+            code: ``"bias_only"``, ``"variance_only"``, ``"both"``, or
+            ``"neither"``. Otherwise falls back to the permutation
+            heuristic based on the relative magnitudes of ``bias_diff``
+            and ``variance_diff``.
         """
+        if self.p_bias is not None and self.p_variance is not None:
+            alpha_component = 0.05 / 2.0
+            bias_sig = self.p_bias < alpha_component
+            var_sig = self.p_variance < alpha_component
+            if bias_sig and var_sig:
+                return "both"
+            if bias_sig:
+                return "bias_only"
+            if var_sig:
+                return "variance_only"
+            return "neither"
+
         abs_bias = abs(self.bias_diff)
         abs_var = abs(self.variance_diff)
         if abs_bias > abs_var * 1.5:

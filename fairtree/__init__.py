@@ -32,6 +32,7 @@ from .fluctuation import (
     prepare_categorical_sample_split,
 )
 from .permutation import (
+    permutation_test_categorical,
     permutation_test,
     test_single_binary_covariate,
     permutation_test_continuous,
@@ -66,6 +67,7 @@ __all__ = [
     "permutation_test",
     "test_single_binary_covariate",
     "permutation_test_continuous",
+    "permutation_test_categorical",
     # corrections
     "bonferroni",
     "holm_bonferroni",

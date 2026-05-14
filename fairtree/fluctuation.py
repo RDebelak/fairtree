@@ -460,10 +460,16 @@ def prepare_categorical_for_testing(
 
 
 def _deterministic_seed_from_arrays(*arrays: np.ndarray) -> int:
-    """SHA-256-based deterministic 32-bit seed from array contents."""
+    """SHA-256-based deterministic 32-bit seed from array values."""
     h = hashlib.sha256()
     for arr in arrays:
-        h.update(np.ascontiguousarray(arr).tobytes())
+        arr = np.asarray(arr)
+        if arr.dtype.kind in {"O", "U", "S"}:
+            for value in arr.tolist():
+                h.update(repr(value).encode("utf-8"))
+                h.update(b"\0")
+        else:
+            h.update(np.ascontiguousarray(arr).tobytes())
     return int.from_bytes(h.digest()[:4], "big")
 
 

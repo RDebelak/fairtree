@@ -32,6 +32,7 @@ from .metrics import (
     calculate_metrics_from_residuals,
 )
 from .permutation import (
+    permutation_test_categorical,
     permutation_test_continuous,
     test_single_binary_covariate,
 )
@@ -114,7 +115,7 @@ def test_mixed_covariates(
     correction: str = "holm",
     alpha: float = 0.05,
     n_permutations: int = 5000,
-    min_samples: int = 50,
+    min_samples: int = 1,
     rng: Optional[np.random.Generator] = None,
 ) -> List[SplitResult]:
     """
@@ -134,8 +135,9 @@ def test_mixed_covariates(
           :class:`FairTreeFluctuationTest` depending on ``method``.
         - ``"categorical"``: unordered labels. Uses sample-splitting
           (:func:`prepare_categorical_sample_split`) followed by the
-          fluctuation test. Only supported when
-          ``method="fluctuation"``.
+          fluctuation test under ``method="fluctuation"``; uses a
+          CART-style maximally-selected categorical permutation test
+          under ``method="permutation"``.
 
     Parameters
     ----------
@@ -158,9 +160,9 @@ def test_mixed_covariates(
     n_permutations : int, default 5000
         Number of permutations for the permutation method. Ignored by
         the fluctuation method.
-    min_samples : int, default 50
-        Minimum samples per side of any continuous split (permutation
-        method only).
+    min_samples : int, default 1
+        Minimum samples per side of any continuous or categorical split
+        (permutation method only).
     rng : np.random.Generator, optional
         Random generator for the permutation method and the categorical
         sample split. If ``None``, a fresh generator is created.
@@ -177,8 +179,7 @@ def test_mixed_covariates(
     ------
     ValueError
         If ``method`` is unknown, a covariate type is unrecognized, or
-        a categorical covariate is requested with the permutation
-        method.
+        a covariate type is unrecognized.
     """
     if method not in {"fluctuation", "permutation"}:
         raise ValueError(
@@ -192,13 +193,7 @@ def test_mixed_covariates(
                 f"Unknown covariate type {cov_type!r} for {cov_name!r}. "
                 f"Expected one of {sorted(_COVARIATE_TYPES)}."
             )
-        if cov_type == "categorical" and method == "permutation":
-            raise ValueError(
-                f"Categorical covariate {cov_name!r} is only supported "
-                "with method='fluctuation'. Either switch method or "
-                "encode the covariate as ordinal."
-            )
-
+    rng_provided = rng is not None
     rng = rng if rng is not None else np.random.default_rng()
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
@@ -258,11 +253,27 @@ def test_mixed_covariates(
                 mask_a = values <= split_value
                 sr = _fluctuation_to_split_result(r, residuals, mask_a)
 
-        # ----- Categorical (fluctuation only) -----
+        # ----- Categorical -----
         elif cov_type == "categorical":
+            if method == "permutation":
+                sr = permutation_test_categorical(
+                    values, y_true, y_pred,
+                    covariate_name=cov_name,
+                    n_permutations=n_permutations,
+                    min_samples=min_samples,
+                    rng=rng,
+                )
+                if sr is not None:
+                    sr = _annotate_permutation_significance(sr, alpha)
+                if sr is not None:
+                    results.append(sr)
+                continue
+
             # Draw a seed from the local RNG so sample splitting is
-            # reproducible when the user fixes the top-level rng.
-            seed = int(rng.integers(0, 2 ** 31 - 1))
+            # reproducible when the user fixes the top-level rng. With
+            # rng=None, use the deterministic content-derived split from
+            # prepare_categorical_sample_split.
+            seed = int(rng.integers(0, 2 ** 31 - 1)) if rng_provided else None
             test_values, test_residuals, _, order_map = (
                 prepare_categorical_sample_split(values, residuals, seed=seed)
             )
@@ -300,6 +311,11 @@ def test_mixed_covariates(
             else:
                 sr.group_a_name = f"{len(group_a_cats)} categories"
             sr.group_b_name = "other categories"
+            sr.group_a_values = frozenset(
+                rank_to_cat[rank]
+                for rank in range(int(split_value) + 1)
+                if rank in rank_to_cat
+            )
 
         if sr is not None:
             results.append(sr)

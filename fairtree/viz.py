@@ -73,7 +73,12 @@ def draw_fairtree(
     def format_node_text(node: TreeNode) -> str:
         lines = []
         if node.split_covariate:
-            lines.append(f"{node.split_covariate} \u2264 {node.split_value:.1f}")
+            if node.split_label is not None:
+                lines.append(node.split_label)
+            elif node.split_value is not None:
+                lines.append(f"{node.split_covariate} \u2264 {node.split_value:.1f}")
+            else:
+                lines.append(str(node.split_covariate))
             if node.p_value_bias is not None:
                 lines.append(f"p(bias)={node.p_value_bias:.4f}")
             if node.p_value_variance is not None:
