@@ -17,8 +17,7 @@ statistic.
 **Reference paper.** Debelak (2026), *FairTree: Subgroup Fairness
 Auditing of Machine Learning Models with Bias–Variance Decomposition.*
 Accepted at the 2026 ACM Conference on Fairness, Accountability, and
-Transparency (FAccT '26). arXiv preprint link will be added when
-available.
+Transparency (FAccT '26). https://arxiv.org/abs/2604.19357
 
 ---
 
