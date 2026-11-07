@@ -30,7 +30,7 @@ _INTERNAL_COLOR = "#fff3cd"   # internal non-root -> light yellow
 
 def draw_fairtree(
     root: TreeNode,
-    figsize: Tuple[int, int] = (16, 10),
+    figsize: Optional[Tuple[int, int]] = None,
     save_path: Optional[str] = None,
     title: str = "FairTree: Differential Performance Analysis",
     show: bool = True,
@@ -43,8 +43,8 @@ def draw_fairtree(
     root : TreeNode
         Root of the tree, as returned by
         :func:`fairtree.build_fairtree`.
-    figsize : tuple of int, default (16, 10)
-        Matplotlib figure size in inches.
+    figsize : tuple of int, optional
+        Figure size in inches; by default adapt to the fitted tree.
     save_path : str, optional
         If given, save the figure to this path at 300 dpi.
     title : str
@@ -58,9 +58,30 @@ def draw_fairtree(
         The figure object, useful if the caller wants to customize it
         further before saving or displaying.
     """
+    positions = {}
+    leaf_count = 0
+    deepest = 0
+
+    def place(node, level):
+        nonlocal leaf_count, deepest
+        deepest = max(deepest, level)
+        children = [child for child in (node.left_child, node.right_child) if child is not None]
+        if children:
+            x = sum(place(child, level + 1) for child in children) / len(children)
+        else:
+            x = 16 + 32 * leaf_count
+            leaf_count += 1
+        positions[id(node)] = (x, level)
+        return x
+
+    place(root, 0)
+    top = 40 + 38 * deepest
+    span = 32 * max(1, leaf_count)
+    if figsize is None:
+        figsize = (max(6, min(32, leaf_count * 3.2)), max(5, min(24, (deepest + 1) * 2.7)))
     fig, ax = plt.subplots(figsize=figsize)
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, 100)
+    ax.set_xlim(0, span)
+    ax.set_ylim(0, top + 28)
     ax.axis("off")
 
     def get_node_color(node: TreeNode) -> str:
@@ -79,6 +100,8 @@ def draw_fairtree(
                 lines.append(f"{node.split_covariate} \u2264 {node.split_value:.1f}")
             else:
                 lines.append(str(node.split_covariate))
+            if node.corrected_p_value is not None:
+                lines.append(f"p(adj)={node.corrected_p_value:.4g}")
             if node.p_value_bias is not None:
                 lines.append(f"p(bias)={node.p_value_bias:.4f}")
             if node.p_value_variance is not None:
@@ -90,7 +113,7 @@ def draw_fairtree(
         return "\n".join(lines)
 
     def draw_node(node: TreeNode, x: float, y: float, width: float) -> float:
-        height = 18 if node.split_covariate else 12
+        height = 28 if node.split_covariate else 18
         box = FancyBboxPatch(
             (x - width / 2, y - height / 2),
             width,
@@ -108,50 +131,27 @@ def draw_fairtree(
         )
         return height
 
-    def draw_recursive(
-        node: TreeNode, x: float, y: float, x_spread: float,
-    ) -> None:
-        width = 22
-        height = draw_node(node, x, y, width)
+    def draw_recursive(node):
+        x, level = positions[id(node)]
+        y = top - 38 * level
+        height = draw_node(node, x, y, 28)
+        for child, label, color in [(node.left_child, "True", "#2e7d32"),
+                                     (node.right_child, "False", "#c62828")]:
+            if child is None:
+                continue
+            child_x, child_level = positions[id(child)]
+            child_y = top - 38 * child_level
+            child_height = 28 if child.split_covariate else 18
+            ax.annotate("", xy=(child_x, child_y + child_height / 2),
+                        xytext=(x, y - height / 2),
+                        arrowprops=dict(arrowstyle="->", color="black", lw=1.5))
+            ax.text((x + child_x) / 2, (y + child_y) / 2, label,
+                    fontsize=9, style="italic", color=color, ha="center")
+            draw_recursive(child)
 
-        if node.left_child is None and node.right_child is None:
-            return
-
-        child_y = y - 25
-        child_x_left = x - x_spread
-        child_x_right = x + x_spread
-
-        ax.annotate(
-            "", xy=(child_x_left, child_y + 9),
-            xytext=(x - 3, y - height / 2),
-            arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
-        )
-        ax.annotate(
-            "", xy=(child_x_right, child_y + 9),
-            xytext=(x + 3, y - height / 2),
-            arrowprops=dict(arrowstyle="->", color="black", lw=1.5),
-        )
-        ax.text(
-            x - x_spread / 2 - 2, y - 12, "True",
-            fontsize=9, style="italic", color="#2e7d32",
-        )
-        ax.text(
-            x + x_spread / 2 + 2, y - 12, "False",
-            fontsize=9, style="italic", color="#c62828",
-        )
-
-        if node.left_child is not None:
-            draw_recursive(node.left_child, child_x_left, child_y, x_spread * 0.5)
-        if node.right_child is not None:
-            draw_recursive(node.right_child, child_x_right, child_y, x_spread * 0.5)
-
-    draw_recursive(root, x=50, y=88, x_spread=22)
-
-    ax.text(
-        50, 98, title,
-        ha="center", va="top",
-        fontsize=14, fontweight="bold",
-    )
+    draw_recursive(root)
+    ax.text(span / 2, top + 25, title, ha="center", va="top",
+            fontsize=14, fontweight="bold")
 
     legend_elements = [
         mpatches.Patch(

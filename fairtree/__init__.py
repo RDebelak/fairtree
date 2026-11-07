@@ -3,7 +3,7 @@ FairTree: subgroup fairness auditing of machine learning models with
 bias-variance decomposition.
 
 This package implements the FairTree algorithm from Debelak (2026),
-accepted at ACM FAccT 2026. Two statistical variants are provided:
+published at ACM FAccT 2026. Two statistical variants are provided:
 
 - Score-based fluctuation test (recommended): higher power, O(n log n).
   See :class:`FairTreeFluctuationTest`.
@@ -11,10 +11,8 @@ accepted at ACM FAccT 2026. Two statistical variants are provided:
 - Permutation test (for small samples): non-parametric, distribution
   free, O(n * n_permutations). See :func:`permutation_test`.
 
-The package exposes the low-level test routines directly. A higher-level
-``FairTree`` orchestrator class that dispatches across multiple
-covariates and produces tree visualizations is provided by
-``fairtree.tree`` (added in a future version).
+The package exposes low-level tests, mixed-covariate testing, recursive
+tree fitting (``fit_fairtree``), and visualization (``draw_fairtree``).
 """
 
 from .metrics import (
@@ -44,7 +42,7 @@ from .corrections import (
     correct_p_values,
     holm_stepdown_decisions,
 )
-from .tree import TreeNode, build_fairtree
+from .tree import TreeNode, build_fairtree, fit_fairtree
 from .viz import draw_fairtree
 from ._split import test_mixed_covariates
 
@@ -77,6 +75,7 @@ __all__ = [
     # tree + viz
     "TreeNode",
     "build_fairtree",
+    "fit_fairtree",
     "draw_fairtree",
     # multi-covariate dispatcher
     "test_mixed_covariates",

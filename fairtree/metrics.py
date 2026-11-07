@@ -14,6 +14,8 @@ from typing import FrozenSet, Optional
 
 import numpy as np
 
+from ._validation import numeric_vector, squared
+
 
 __all__ = [
     "BiasVarianceMetrics",
@@ -60,10 +62,10 @@ class SplitResult:
     """
     Summary of a FairTree test for a single covariate.
 
-    Required fields are populated by both test variants. Optional fields
-    marked below are populated by the score-based fluctuation variant;
-    the permutation variant leaves them as ``None`` except for
-    ``split_point``, which continuous-covariate permutation tests set.
+    Required fields and primary partition metadata are populated by both test
+    variants. Component statistics/p-values are specific to fluctuation tests.
+    The mixed-covariate dispatcher also records fitting settings, adjusted
+    decisions, and test-sample metadata for either variant.
 
     Parameters
     ----------
@@ -102,11 +104,14 @@ class SplitResult:
         Component p-values from the bias and variance sub-tests
         (fluctuation only).
     is_significant : bool, optional
-        Combined significance at the test's alpha (fluctuation only).
+        Significance after the across-covariate adjustment. Single-covariate
+        low-level results have no across-covariate adjustment.
     bias_significant, variance_significant : bool, optional
-        Component-level significance at alpha / 2 (fluctuation only).
+        Per-covariate component significance at alpha / 2 (fluctuation only).
+        These diagnostic flags are not corrected across covariates.
     detected_issue : {"None", "Bias", "Variance", "Both"}, optional
-        Human-readable disparity type (fluctuation only).
+        Human-readable disparity type after adjustment. Permutation labels are
+        descriptive heuristics, not separate tests of bias and variance.
     """
 
     covariate: str
@@ -123,17 +128,39 @@ class SplitResult:
     # -- Primary split point (both methods, when applicable) --
     split_point: Optional[float] = None
     group_a_values: Optional[FrozenSet[object]] = None
-    # -- Fluctuation-only extras --
+    # -- Fluctuation-only component statistics --
     bias_split_point: Optional[float] = None
     variance_split_point: Optional[float] = None
     bias_statistic: Optional[float] = None
     variance_statistic: Optional[float] = None
     p_bias: Optional[float] = None
     p_variance: Optional[float] = None
+    # -- Decisions and fitting metadata --
     is_significant: Optional[bool] = None
     bias_significant: Optional[bool] = None
     variance_significant: Optional[bool] = None
     detected_issue: Optional[str] = None
+    alpha: float = 0.05
+    raw_is_significant: Optional[bool] = None
+    covariate_type: Optional[str] = None
+    method: Optional[str] = None
+    correction: Optional[str] = None
+    n_permutations: Optional[int] = None
+    min_samples: Optional[int] = None
+    family_size: Optional[int] = None
+    covariate_types: Optional[dict[str, str]] = None
+    # Test indices are positional within the supplied node/dataframe, not
+    # pandas index labels. Group metrics/n_a/n_b always describe the full node.
+    test_n: Optional[int] = None
+    test_n_a: Optional[int] = None
+    test_n_b: Optional[int] = None
+    test_indices: Optional[tuple[int, ...]] = None
+    split_seed: Optional[int] = None
+
+    @property
+    def has_split(self) -> bool:
+        """Whether a covariate-defined partition is available."""
+        return self.group_a_values is not None or self.split_point is not None
 
     @property
     def primary_issue(self) -> str:
@@ -150,10 +177,14 @@ class SplitResult:
             heuristic based on the relative magnitudes of ``bias_diff``
             and ``variance_diff``.
         """
+        if self.is_significant is False:
+            return "neither"
         if self.p_bias is not None and self.p_variance is not None:
-            alpha_component = 0.05 / 2.0
-            bias_sig = self.p_bias < alpha_component
-            var_sig = self.p_variance < alpha_component
+            alpha_component = self.alpha / 2.0
+            bias_sig = (self.bias_significant if self.bias_significant is not None
+                        else self.p_bias < alpha_component)
+            var_sig = (self.variance_significant if self.variance_significant is not None
+                       else self.p_variance < alpha_component)
             if bias_sig and var_sig:
                 return "both"
             if bias_sig:
@@ -185,13 +216,13 @@ def calculate_metrics_from_residuals(residuals: np.ndarray) -> BiasVarianceMetri
     BiasVarianceMetrics
         MSE, bias, variance, and squared bias.
     """
-    residuals = np.asarray(residuals)
+    residuals = numeric_vector(residuals, "residuals", allow_empty=True)
     if residuals.size == 0:
         return BiasVarianceMetrics(0.0, 0.0, 0.0, 0.0)
 
     bias = float(np.mean(residuals))
     variance = float(np.var(residuals))
-    mse = float(np.mean(residuals ** 2))
+    mse = float(np.mean(squared(residuals)))
     bias_squared = bias ** 2
 
     return BiasVarianceMetrics(

@@ -1,19 +1,4 @@
-"""
-Multi-covariate dispatcher for FairTree.
-
-Provides :func:`test_mixed_covariates`, which applies the chosen FairTree
-variant (fluctuation or permutation) to each covariate according to its
-type, then applies a family-wise correction across the full set of
-p-values.
-
-For unordered categorical covariates, sample splitting is used to
-prevent category-ordering data leakage that would otherwise inflate the
-Type I error. See :func:`prepare_categorical_sample_split`.
-
-Users typically import :func:`test_mixed_covariates` directly from the
-top-level :mod:`fairtree` package.
-"""
-
+"""Mixed-covariate tests with explicit adjusted decisions and split metadata."""
 from __future__ import annotations
 
 from typing import Dict, List, Optional
@@ -21,88 +6,63 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from ._validation import (
+    aligned, alpha_level, count, generator, labels_vector, levels,
+    numeric_vector, prediction_residuals,
+)
 from .corrections import correct_p_values
-from .fluctuation import (
-    FairTreeFluctuationTest,
-    FluctuationTestResult,
-    prepare_categorical_sample_split,
-)
-from .metrics import (
-    SplitResult,
-    calculate_metrics_from_residuals,
-)
+from .fluctuation import FairTreeFluctuationTest, prepare_categorical_sample_split
+from .metrics import SplitResult, calculate_metrics_from_residuals
 from .permutation import (
-    permutation_test_categorical,
-    permutation_test_continuous,
+    permutation_test_categorical, permutation_test_continuous,
     test_single_binary_covariate,
 )
 
-
 __all__ = ["test_mixed_covariates"]
-
-
 _COVARIATE_TYPES = {"binary", "continuous", "ordinal", "categorical"}
-_ORDERED_TYPES = {"continuous", "ordinal"}
 
 
-def _fluctuation_to_split_result(
-    r: FluctuationTestResult,
-    residuals: np.ndarray,
-    mask_a: np.ndarray,
-    group_a_name: Optional[str] = None,
-    group_b_name: Optional[str] = None,
-) -> SplitResult:
-    """Convert a FluctuationTestResult + group masks into a SplitResult."""
-    mask_b = ~mask_a
+def _validate_covariates(df, types, n):
+    if not isinstance(df, pd.DataFrame) or not df.columns.is_unique:
+        raise ValueError("covariates_df must be a DataFrame with unique columns.")
+    if len(df) != n:
+        raise ValueError("Covariates and responses must have the same length.")
+    if not isinstance(types, dict):
+        raise ValueError("covariate_types must be a dictionary of column names to types.")
+    for name, kind in types.items():
+        if kind not in _COVARIATE_TYPES:
+            raise ValueError(f"Unknown covariate type {kind!r} for {name!r}.")
+        if name not in df.columns:
+            raise ValueError(f"Covariate {name!r} is not in covariates_df.")
+        if kind in {"continuous", "ordinal"}:
+            numeric_vector(df[name].to_numpy(), str(name))
+        else:
+            labels_vector(df[name].to_numpy(), str(name))
+
+
+def _fluctuation_to_split_result(r, residuals, mask_a, group_a_name=None, group_b_name=None):
+    split_point = r.bias_split_point if r.bias_significant else r.variance_split_point
+    if split_point is None:
+        return None
     metrics_a = calculate_metrics_from_residuals(residuals[mask_a])
-    metrics_b = calculate_metrics_from_residuals(residuals[mask_b])
-
-    split_point = (
-        r.bias_split_point if r.bias_significant else r.variance_split_point
-    )
-
-    if group_a_name is None:
-        group_a_name = f"{r.covariate} <= {split_point:.4g}"
-    if group_b_name is None:
-        group_b_name = f"{r.covariate} > {split_point:.4g}"
-
+    metrics_b = calculate_metrics_from_residuals(residuals[~mask_a])
     return SplitResult(
         covariate=r.covariate,
-        group_a_name=group_a_name,
-        group_b_name=group_b_name,
-        p_value=r.p_value_combined,
-        corrected_p_value=r.p_value_combined,  # updated after correction
-        metrics_a=metrics_a,
-        metrics_b=metrics_b,
-        n_a=int(mask_a.sum()),
-        n_b=int(mask_b.sum()),
+        group_a_name=group_a_name or f"{r.covariate} <= {split_point:.4g}",
+        group_b_name=group_b_name or f"{r.covariate} > {split_point:.4g}",
+        p_value=r.p_value_combined, corrected_p_value=r.p_value_combined,
+        metrics_a=metrics_a, metrics_b=metrics_b,
+        n_a=int(mask_a.sum()), n_b=int((~mask_a).sum()),
         bias_diff=metrics_a.bias - metrics_b.bias,
         variance_diff=metrics_a.variance - metrics_b.variance,
-        split_point=float(split_point),
-        bias_split_point=float(r.bias_split_point),
-        variance_split_point=float(r.variance_split_point),
-        bias_statistic=r.bias_statistic,
-        variance_statistic=r.variance_statistic,
-        p_bias=r.p_value_bias,
-        p_variance=r.p_value_variance,
-        is_significant=r.is_significant,
-        bias_significant=r.bias_significant,
-        variance_significant=r.variance_significant,
-        detected_issue=r.detected_issue,
+        split_point=split_point, bias_split_point=r.bias_split_point,
+        variance_split_point=r.variance_split_point,
+        bias_statistic=r.bias_statistic, variance_statistic=r.variance_statistic,
+        p_bias=r.p_value_bias, p_variance=r.p_value_variance,
+        is_significant=r.is_significant, raw_is_significant=r.is_significant,
+        bias_significant=r.bias_significant, variance_significant=r.variance_significant,
+        detected_issue=r.detected_issue, alpha=r.alpha,
     )
-
-
-def _annotate_permutation_significance(
-    sr: SplitResult,
-    alpha: float,
-) -> SplitResult:
-    """Populate ``is_significant`` on a permutation-derived SplitResult.
-
-    Uses the raw p-value so the flag does not change after the
-    across-covariate correction is applied.
-    """
-    sr.is_significant = sr.p_value < alpha
-    return sr
 
 
 def test_mixed_covariates(
@@ -115,222 +75,136 @@ def test_mixed_covariates(
     correction: str = "holm",
     alpha: float = 0.05,
     n_permutations: int = 5000,
-    min_samples: int = 1,
+    min_samples: Optional[int] = None,
     rng: Optional[np.random.Generator] = None,
 ) -> List[SplitResult]:
-    """
-    Test multiple covariates of mixed types, with family-wise correction.
+    """Test mixed covariates and adjust across the requested family.
 
-    For each covariate, applies the appropriate single-covariate test
-    based on its declared type, then adjusts all raw p-values together
-    using ``correction``.
+    ``is_significant`` and ``detected_issue`` reflect adjusted significance.
+    ``raw_is_significant`` preserves the per-covariate decision. Fluctuation
+    component flags remain diagnostic tests at alpha/2 within a covariate;
+    they do not themselves claim simultaneous component error control across
+    all covariates. BH controls FDR, whereas Holm/Bonferroni target FWER.
 
-    Covariate types
-        - ``"binary"``: two-level variable. Uses
-          :func:`fairtree.test_single_binary_covariate` under
-          ``method="permutation"`` or :class:`FairTreeFluctuationTest`
-          under ``method="fluctuation"``.
-        - ``"continuous"``, ``"ordinal"``: ordered numeric.
-          Uses :func:`fairtree.permutation_test_continuous` or
-          :class:`FairTreeFluctuationTest` depending on ``method``.
-        - ``"categorical"``: unordered labels. Uses sample-splitting
-          (:func:`prepare_categorical_sample_split`) followed by the
-          fluctuation test under ``method="fluctuation"``; uses a
-          CART-style maximally-selected categorical permutation test
-          under ``method="permutation"``.
+    ``min_samples`` is a minimum *per child*, for both methods and all types.
+    Its default is 10 for fluctuation tests and 1 for permutation tests. In a
+    sample-split categorical test, each held-out child must meet this minimum.
+    Ineligible covariates are omitted from results but contribute p=1 to the
+    requested multiple-testing family.
 
-    Parameters
-    ----------
-    covariates_df : pd.DataFrame
-        DataFrame with one column per covariate in ``covariate_types``.
-    covariate_types : dict[str, str]
-        Mapping from covariate name to type label ("binary",
-        "continuous", "ordinal", or "categorical").
-    y_true, y_pred : np.ndarray
-        1D arrays of true and predicted values, aligned with the rows of
-        ``covariates_df``.
-    method : {"fluctuation", "permutation"}, default "fluctuation"
-        Which variant of the FairTree test to apply.
-    correction : {"bonferroni", "holm", "fdr_bh"}, default "holm"
-        Family-wise p-value correction across covariates.
-    alpha : float, default 0.05
-        Significance level for per-covariate decisions. The
-        ``is_significant`` flag on each returned :class:`SplitResult`
-        uses the raw p-value against this level.
-    n_permutations : int, default 5000
-        Number of permutations for the permutation method. Ignored by
-        the fluctuation method.
-    min_samples : int, default 1
-        Minimum samples per side of any continuous or categorical split
-        (permutation method only).
-    rng : np.random.Generator, optional
-        Random generator for the permutation method and the categorical
-        sample split. If ``None``, a fresh generator is created.
+    Continuous and ordinal covariates must be numeric. Binary variables and
+    two-level categorical variables use the actual group boundary. For more
+    than two unordered levels, fluctuation testing learns the order on half
+    of the data and tests the other half. Unseen levels receive a middle rank
+    consistently in the test, metrics, and recorded membership rule.
 
-    Returns
-    -------
-    list of SplitResult
-        One result per covariate, sorted ascending by corrected p-value.
-        The fluctuation-specific fields (``bias_split_point``,
-        ``bias_significant``, etc.) are populated only when
-        ``method="fluctuation"``.
-
-    Raises
-    ------
-    ValueError
-        If ``method`` is unknown, a covariate type is unrecognized, or
-        a covariate type is unrecognized.
+    All ``n_a``, ``n_b``, and metrics describe the full supplied data. ``test_n``,
+    ``test_n_a``, ``test_n_b`` and ``test_indices`` identify the observations used
+    in testing. Indices are positional, not pandas index labels. Without an
+    explicit RNG, categorical folds use seed 0 independently of outcomes;
+    permutation tests use a fresh RNG. Pass a seeded Generator for repeatable
+    randomized runs. Inputs must be finite, aligned, one-dimensional arrays;
+    missing values are rejected rather than silently omitted.
     """
     if method not in {"fluctuation", "permutation"}:
-        raise ValueError(
-            f"Unknown method: {method!r}. "
-            "Expected 'fluctuation' or 'permutation'."
-        )
-
-    for cov_name, cov_type in covariate_types.items():
-        if cov_type not in _COVARIATE_TYPES:
-            raise ValueError(
-                f"Unknown covariate type {cov_type!r} for {cov_name!r}. "
-                f"Expected one of {sorted(_COVARIATE_TYPES)}."
-            )
-    rng_provided = rng is not None
-    rng = rng if rng is not None else np.random.default_rng()
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    residuals = y_pred - y_true
-
-    ft = FairTreeFluctuationTest(alpha=alpha) if method == "fluctuation" else None
-
-    results: List[SplitResult] = []
-
-    for cov_name, cov_type in covariate_types.items():
-        values = covariates_df[cov_name].values
-        sr: Optional[SplitResult] = None
-
-        # ----- Binary -----
-        if cov_type == "binary":
-            if method == "permutation":
-                sr = test_single_binary_covariate(
-                    values, residuals,
-                    covariate_name=cov_name,
-                    n_permutations=n_permutations,
-                    rng=rng,
-                )
-                if sr is not None:
-                    sr = _annotate_permutation_significance(sr, alpha)
-            else:  # fluctuation
-                unique = np.unique(values)
-                if len(unique) != 2:
-                    sr = None
-                else:
-                    mapped = (values == unique[1]).astype(int)
-                    r = ft.test(mapped, y_true, y_pred, covariate_name=cov_name)
-                    mask_a = mapped == 0
-                    sr = _fluctuation_to_split_result(
-                        r, residuals, mask_a,
-                        group_a_name=str(unique[0]),
-                        group_b_name=str(unique[1]),
-                    )
-
-        # ----- Continuous / Ordinal -----
-        elif cov_type in _ORDERED_TYPES:
-            if method == "permutation":
-                sr = permutation_test_continuous(
-                    values, y_true, y_pred,
-                    covariate_name=cov_name,
-                    n_permutations=n_permutations,
-                    min_samples=min_samples,
-                    rng=rng,
-                )
-                sr = _annotate_permutation_significance(sr, alpha)
-            else:  # fluctuation
-                r = ft.test(values, y_true, y_pred, covariate_name=cov_name)
-                split_value = (
-                    r.bias_split_point
-                    if r.bias_significant
-                    else r.variance_split_point
-                )
-                mask_a = values <= split_value
-                sr = _fluctuation_to_split_result(r, residuals, mask_a)
-
-        # ----- Categorical -----
-        elif cov_type == "categorical":
-            if method == "permutation":
-                sr = permutation_test_categorical(
-                    values, y_true, y_pred,
-                    covariate_name=cov_name,
-                    n_permutations=n_permutations,
-                    min_samples=min_samples,
-                    rng=rng,
-                )
-                if sr is not None:
-                    sr = _annotate_permutation_significance(sr, alpha)
-                if sr is not None:
-                    results.append(sr)
-                continue
-
-            # Draw a seed from the local RNG so sample splitting is
-            # reproducible when the user fixes the top-level rng. With
-            # rng=None, use the deterministic content-derived split from
-            # prepare_categorical_sample_split.
-            seed = int(rng.integers(0, 2 ** 31 - 1)) if rng_provided else None
-            test_values, test_residuals, _, order_map = (
-                prepare_categorical_sample_split(values, residuals, seed=seed)
-            )
-            # Run the fluctuation test on the test half only.
-            y_dummy = np.zeros_like(test_residuals)
-            r = ft.test(
-                test_values, y_dummy, test_residuals,
-                covariate_name=cov_name,
-            )
-
-            # For tree display and tidy reporting, apply the learned
-            # ordering to the full data and compute full-sample metrics.
-            mid_rank = len(order_map) // 2
-            all_ordered = np.array(
-                [order_map.get(cat, mid_rank) for cat in values]
-            )
-            split_value = (
-                r.bias_split_point
-                if r.bias_significant
-                else r.variance_split_point
-            )
-            mask_a_full = all_ordered <= split_value
-
-            sr = _fluctuation_to_split_result(r, residuals, mask_a_full)
-
-            # Rebuild human-readable group names from original labels.
-            rank_to_cat = {v: k for k, v in order_map.items()}
-            group_a_cats = sorted(
-                str(rank_to_cat[rank])
-                for rank in range(int(split_value) + 1)
-                if rank in rank_to_cat
-            )
-            if len(group_a_cats) <= 3:
-                sr.group_a_name = "{" + ", ".join(group_a_cats) + "}"
+        raise ValueError(f"Unknown method: {method!r}. Expected 'fluctuation' or 'permutation'.")
+    alpha = alpha_level(alpha)
+    min_samples = count(min_samples if min_samples is not None else
+                        (10 if method == "fluctuation" else 1), "min_samples")
+    n_permutations = count(n_permutations, "n_permutations")
+    correct_p_values([], method=correction)  # Validate even when no split is eligible.
+    provided_rng = rng is not None
+    rng = generator(rng)
+    residuals = prediction_residuals(y_true, y_pred)
+    _validate_covariates(covariates_df, covariate_types, len(residuals))
+    zeros = np.zeros(len(residuals))
+    ft = FairTreeFluctuationTest(alpha, min_samples)
+    results = []
+    for name, kind in covariate_types.items():
+        raw = covariates_df[name].to_numpy()
+        ordered = kind in {"continuous", "ordinal"}
+        values = numeric_vector(raw, str(name)) if ordered else labels_vector(raw, str(name))
+        aligned(values, residuals)
+        unique = None if ordered else levels(values)
+        is_binary = kind == "binary" or (kind == "categorical" and len(unique) == 2)
+        sr = None
+        test_idx = None
+        test_mask = None
+        seed = None
+        if kind == "binary" and len(unique) != 2:
+            continue
+        if method == "permutation":
+            if is_binary:
+                sr = test_single_binary_covariate(values, residuals, name,
+                                                  n_permutations, rng, min_samples=min_samples)
+            elif ordered:
+                sr = permutation_test_continuous(values, zeros, residuals, name,
+                                                n_permutations, min_samples, rng=rng)
             else:
-                sr.group_a_name = f"{len(group_a_cats)} categories"
-            sr.group_b_name = "other categories"
-            sr.group_a_values = frozenset(
-                rank_to_cat[rank]
-                for rank in range(int(split_value) + 1)
-                if rank in rank_to_cat
-            )
+                sr = permutation_test_categorical(values, zeros, residuals, name,
+                                                 n_permutations, min_samples, rng=rng)
+        elif is_binary:
+            mapped = (values == unique[1]).astype(float)
+            r = ft.test(mapped, zeros, residuals, name)
+            sr = _fluctuation_to_split_result(r, residuals, mapped == 0,
+                                             str(unique[0]), str(unique[1]))
+            if sr is not None:
+                sr.group_a_values = frozenset([unique[0]])
+                # Numeric split fields refer to the internal rank; membership
+                # is authoritative when group_a_values is populated.
+        elif ordered:
+            r = ft.test(values, zeros, residuals, name)
+            split = r.bias_split_point if r.bias_significant else r.variance_split_point
+            if split is not None:
+                sr = _fluctuation_to_split_result(r, residuals, values <= split)
+        elif len(unique) > 2:
+            seed = int(rng.integers(0, 2 ** 31 - 1)) if provided_rng else 0
+            test_values, test_residuals, test_idx, mapping = prepare_categorical_sample_split(
+                values, residuals, seed=seed)
+            r = ft.test(test_values, np.zeros(len(test_idx)), test_residuals, name)
+            split = r.bias_split_point if r.bias_significant else r.variance_split_point
+            if split is not None:
+                group = frozenset(cat for cat, rank in mapping.items() if rank <= split)
+                mask = np.isin(values, np.array(list(group), dtype=object))
+                sr = _fluctuation_to_split_result(r, residuals, mask)
+                sr.group_a_values = group
+                names = sorted(map(str, group))
+                sr.group_a_name = ("{" + ", ".join(names) + "}" if len(names) <= 3
+                                   else f"{len(names)} categories")
+                sr.group_b_name = "other categories"
+                test_mask = test_values <= split
+        if sr is None:
+            continue
+        sr.alpha = alpha
+        sr.covariate_type = kind
+        sr.method = method
+        sr.correction = correction
+        sr.n_permutations = n_permutations
+        sr.min_samples = min_samples
+        sr.family_size = len(covariate_types)
+        sr.covariate_types = dict(covariate_types)
+        sr.split_seed = seed
+        sr.test_n = len(test_idx) if test_idx is not None else len(residuals)
+        sr.test_indices = tuple(map(int, test_idx)) if test_idx is not None else None
+        sr.test_n_a = int(test_mask.sum()) if test_mask is not None else sr.n_a
+        sr.test_n_b = sr.test_n - sr.test_n_a
+        results.append(sr)
 
-        if sr is not None:
-            results.append(sr)
-
-    if not results:
-        return []
-
-    # Family-wise correction across covariates.
-    raw_p_values = [sr.p_value for sr in results]
-    adjusted = correct_p_values(raw_p_values, method=correction)
-    for sr, adj in zip(results, adjusted):
+    by_name = {r.covariate: r for r in results}
+    adjusted = correct_p_values([by_name[name].p_value if name in by_name else 1.0
+                                 for name in covariate_types], correction)
+    for name, adj in zip(covariate_types, adjusted):
+        if name not in by_name:
+            continue
+        sr = by_name[name]
+        sr.raw_is_significant = sr.p_value < alpha
         sr.corrected_p_value = float(adj)
+        sr.is_significant = bool(adj < alpha)
+        if not sr.is_significant:
+            sr.detected_issue = "None"
+        elif method == "permutation":
+            sr.detected_issue = {"bias": "Bias", "variance": "Variance", "both": "Both"}[sr.primary_issue]
+    return sorted(results, key=lambda r: (r.corrected_p_value, r.p_value))
 
-    results.sort(key=lambda r: r.corrected_p_value)
-    return results
 
-# Tell pytest this isn't a test function, despite the ``test_`` prefix.
 test_mixed_covariates.__test__ = False

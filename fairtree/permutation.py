@@ -1,11 +1,11 @@
 """
 Permutation test for FairTree.
 
-Non-parametric, distribution-free alternative to the score-based
-fluctuation test. Slower (O(n * n_permutations)) but makes no asymptotic
-assumptions; recommended for small samples or as a confirmatory test
-when the asymptotic approximation of the fluctuation test may be
-unreliable.
+Randomization tests of squared-error differences, requiring exchangeability
+under the null. The fixed two-group test costs O(n * n_permutations); searching
+over splits adds the cost of repeating that search in every permutation.
+These tests do not require the fluctuation test's asymptotic approximation,
+but they target MSE differences rather than signed bias and variance separately.
 """
 
 from __future__ import annotations
@@ -17,6 +17,10 @@ import numpy as np
 from .metrics import (
     SplitResult,
     calculate_metrics_from_residuals,
+)
+from ._validation import (
+    aligned, count, generator, labels_vector, levels, numeric_vector,
+    prediction_residuals, squared,
 )
 
 
@@ -58,12 +62,13 @@ def permutation_test(
         Keys: ``p_value``, ``metrics_a``, ``metrics_b``, ``n_a``,
         ``n_b``.
     """
-    rng = rng if rng is not None else np.random.default_rng()
+    rng = generator(rng)
+    n_permutations = count(n_permutations, "n_permutations")
 
-    residuals_a = np.asarray(residuals_a)
-    residuals_b = np.asarray(residuals_b)
-    loss_a = residuals_a ** 2
-    loss_b = residuals_b ** 2
+    residuals_a = numeric_vector(residuals_a, "residuals_a")
+    residuals_b = numeric_vector(residuals_b, "residuals_b")
+    loss_a = squared(residuals_a)
+    loss_b = squared(residuals_b)
     pooled = np.concatenate([loss_a, loss_b])
 
     obs_diff = float(np.mean(loss_a) - np.mean(loss_b))
@@ -74,7 +79,9 @@ def permutation_test(
         shuffled = rng.permutation(pooled)
         perm_diffs[i] = np.mean(shuffled[:n_a]) - np.mean(shuffled[n_a:])
 
-    p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_diff)))
+    tolerance = 100 * np.finfo(float).eps * abs(obs_diff)
+    hits = np.count_nonzero(np.abs(perm_diffs) >= abs(obs_diff) - tolerance)
+    p_value = float((hits + 1) / (n_permutations + 1))
 
     return {
         "p_value": p_value,
@@ -91,6 +98,8 @@ def test_single_binary_covariate(
     covariate_name: str = "covariate",
     n_permutations: int = 5000,
     rng: Optional[np.random.Generator] = None,
+    *,
+    min_samples: int = 1,
 ) -> Optional[SplitResult]:
     """
     Permutation test on a single binary covariate.
@@ -107,25 +116,31 @@ def test_single_binary_covariate(
         Number of permutations.
     rng : np.random.Generator, optional
         Random generator.
+    min_samples : int, default 1
+        Minimum number of observations in each group.
 
     Returns
     -------
     SplitResult or None
         ``None`` if the covariate does not have exactly two levels or
-        either side of the split is empty.
+        either side fails the minimum child size.
     """
-    covariate_values = np.asarray(covariate_values)
-    residuals = np.asarray(residuals)
+    covariate_values = labels_vector(covariate_values)
+    residuals = numeric_vector(residuals, "residuals")
+    aligned(covariate_values, residuals)
+    min_samples = count(min_samples, "min_samples")
+    n_permutations = count(n_permutations, "n_permutations")
+    rng = generator(rng)
 
-    unique = np.unique(covariate_values)
+    unique = levels(covariate_values)
     if len(unique) != 2:
         return None
 
-    val_a, val_b = sorted(unique.tolist(), key=str)
+    val_a, val_b = unique
     mask_a = covariate_values == val_a
     mask_b = covariate_values == val_b
 
-    if mask_a.sum() == 0 or mask_b.sum() == 0:
+    if mask_a.sum() < min_samples or mask_b.sum() < min_samples:
         return None
 
     result = permutation_test(
@@ -149,6 +164,9 @@ def test_single_binary_covariate(
         n_b=result["n_b"],
         bias_diff=metrics_a.bias - metrics_b.bias,
         variance_diff=metrics_a.variance - metrics_b.variance,
+        group_a_values=frozenset([val_a]),
+        covariate_type="binary", method="permutation",
+        min_samples=min_samples, n_permutations=n_permutations,
     )
 
 
@@ -157,7 +175,7 @@ def _find_best_split_statistic(
     mse_values: np.ndarray,
     min_samples: int = 1,
     max_splits: Optional[int] = None,
-) -> Tuple[float, float, int]:
+) -> Tuple[Optional[float], float, int]:
     """
     Search ordered split points for the maximum |mean(mse_left) - mean(mse_right)|.
 
@@ -172,16 +190,18 @@ def _find_best_split_statistic(
     """
     ordered_unique = np.unique(covariate_values)
     if len(ordered_unique) < 2:
-        return float(np.median(covariate_values)), 0.0, len(covariate_values)
+        return None, 0.0, 0
 
-    unique_splits = (ordered_unique[:-1] + ordered_unique[1:]) / 2.0
+    lower, upper = ordered_unique[:-1], ordered_unique[1:]
+    midpoints = lower / 2.0 + upper / 2.0
+    unique_splits = np.where((midpoints >= lower) & (midpoints < upper), midpoints, lower)
     if max_splits is not None and max_splits > 0 and len(unique_splits) > max_splits:
         indices = np.linspace(0, len(unique_splits) - 1, max_splits).round().astype(int)
         unique_splits = np.unique(unique_splits[indices])
 
-    best_split = float(np.median(covariate_values))
-    best_diff = 0.0
-    best_n_left = len(covariate_values) // 2
+    best_split = None
+    best_diff = -np.inf
+    best_n_left = 0
 
     for split in unique_splits:
         mask_left = covariate_values <= split
@@ -198,7 +218,7 @@ def _find_best_split_statistic(
             best_split = float(split)
             best_n_left = n_left
 
-    return best_split, best_diff, best_n_left
+    return best_split, best_diff if best_split is not None else 0.0, best_n_left
 
 
 def permutation_test_continuous(
@@ -210,7 +230,7 @@ def permutation_test_continuous(
     min_samples: int = 1,
     max_splits: Optional[int] = None,
     rng: Optional[np.random.Generator] = None,
-) -> SplitResult:
+) -> Optional[SplitResult]:
     """
     Permutation test on a continuous covariate (maximally-selected statistic).
 
@@ -220,7 +240,7 @@ def permutation_test_continuous(
     dataset. This correction is what the "maximally selected statistic"
     problem demands: simply permuting at a fixed observed split would
     underestimate the null tail and inflate the rejection rate.
-    Complexity is ``O(n_splits * n_permutations)``.
+    The current mask-based search costs ``O(n * n_splits * n_permutations)``.
 
     For an ``O(n log n)`` alternative, use
     :class:`fairtree.FairTreeFluctuationTest`.
@@ -247,22 +267,26 @@ def permutation_test_continuous(
 
     Returns
     -------
-    SplitResult
+    SplitResult or None
         Summary with ``split_point`` populated. Raw ``p_value`` uses the
         ``(hits + 1) / (n_permutations + 1)`` estimator.
+        Returns ``None`` if no split satisfies the minimum child size.
     """
-    rng = rng if rng is not None else np.random.default_rng()
-
-    covariate_values = np.asarray(covariate_values)
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-
-    residuals = y_pred - y_true
-    mse_values = residuals ** 2
+    rng = generator(rng)
+    n_permutations = count(n_permutations, "n_permutations")
+    min_samples = count(min_samples, "min_samples")
+    if max_splits is not None:
+        max_splits = count(max_splits, "max_splits")
+    covariate_values = numeric_vector(covariate_values, "covariate_values")
+    residuals = prediction_residuals(y_true, y_pred)
+    aligned(covariate_values, residuals)
+    mse_values = squared(residuals)
 
     best_split, obs_max_diff, _ = _find_best_split_statistic(
         covariate_values, mse_values, min_samples, max_splits=max_splits
     )
+    if best_split is None:
+        return None
 
     perm_max_diffs = np.empty(n_permutations)
     for i in range(n_permutations):
@@ -274,7 +298,8 @@ def permutation_test_continuous(
 
     # + 1 smoothing: hits + 1 in numerator, n_perm + 1 in denominator
     p_value = float(
-        (np.sum(perm_max_diffs >= obs_max_diff) + 1) / (n_permutations + 1)
+        (np.sum(perm_max_diffs >= obs_max_diff - 100 * np.finfo(float).eps * obs_max_diff) + 1)
+        / (n_permutations + 1)
     )
 
     mask_left = covariate_values <= best_split
@@ -294,6 +319,8 @@ def permutation_test_continuous(
         bias_diff=metrics_a.bias - metrics_b.bias,
         variance_diff=metrics_a.variance - metrics_b.variance,
         split_point=float(best_split),
+        covariate_type="continuous", method="permutation",
+        min_samples=min_samples, n_permutations=n_permutations,
     )
 
 
@@ -301,7 +328,7 @@ def _find_best_categorical_partition(
     categories: np.ndarray,
     mse_values: np.ndarray,
     min_samples: int = 1,
-) -> Tuple[frozenset, float, int]:
+) -> Tuple[Optional[frozenset], float, int]:
     """
     CART-style categorical split used by the reference implementation.
 
@@ -309,22 +336,22 @@ def _find_best_categorical_partition(
     induced by splitting that order are evaluated.
     """
     categories = np.asarray(categories)
-    unique = np.unique(categories)
+    unique = levels(categories)
     if len(unique) < 2:
-        return frozenset(unique.tolist()), 0.0, len(categories)
+        return None, 0.0, 0
 
     means = []
     for cat in unique:
         means.append((cat, float(np.mean(mse_values[categories == cat]))))
     ordered = [cat for cat, _ in sorted(means, key=lambda item: item[1])]
 
-    best_group: frozenset = frozenset([ordered[0]])
-    best_diff = 0.0
-    best_n_left = int(np.sum(categories == ordered[0]))
+    best_group = None
+    best_diff = -np.inf
+    best_n_left = 0
 
     for i in range(1, len(ordered)):
         group = frozenset(ordered[:i])
-        mask = np.isin(categories, list(group))
+        mask = np.isin(categories, np.array(list(group), dtype=object))
         n_left = int(mask.sum())
         n_right = len(categories) - n_left
         if n_left < min_samples or n_right < min_samples:
@@ -336,7 +363,7 @@ def _find_best_categorical_partition(
             best_group = group
             best_n_left = n_left
 
-    return best_group, best_diff, best_n_left
+    return best_group, best_diff if best_group is not None else 0.0, best_n_left
 
 
 def _format_category_group(values: frozenset) -> str:
@@ -364,21 +391,23 @@ def permutation_test_categorical(
     re-selects the best partition for each permutation, correcting for
     the maximally-selected partition.
     """
-    rng = rng if rng is not None else np.random.default_rng()
-
-    covariate_values = np.asarray(covariate_values)
-    y_true = np.asarray(y_true)
-    y_pred = np.asarray(y_pred)
-    unique = np.unique(covariate_values)
+    rng = generator(rng)
+    n_permutations = count(n_permutations, "n_permutations")
+    min_samples = count(min_samples, "min_samples")
+    covariate_values = labels_vector(covariate_values)
+    residuals = prediction_residuals(y_true, y_pred)
+    aligned(covariate_values, residuals)
+    unique = levels(covariate_values)
     if len(unique) < 2:
         return None
 
-    residuals = y_pred - y_true
-    mse_values = residuals ** 2
+    mse_values = squared(residuals)
 
     best_group, obs_max_diff, _ = _find_best_categorical_partition(
         covariate_values, mse_values, min_samples=min_samples
     )
+    if best_group is None:
+        return None
 
     perm_max_diffs = np.empty(n_permutations)
     for i in range(n_permutations):
@@ -389,10 +418,11 @@ def permutation_test_categorical(
         perm_max_diffs[i] = perm_max
 
     p_value = float(
-        (np.sum(perm_max_diffs >= obs_max_diff) + 1) / (n_permutations + 1)
+        (np.sum(perm_max_diffs >= obs_max_diff - 100 * np.finfo(float).eps * obs_max_diff) + 1)
+        / (n_permutations + 1)
     )
 
-    mask_a = np.isin(covariate_values, list(best_group))
+    mask_a = np.isin(covariate_values, np.array(list(best_group), dtype=object))
     metrics_a = calculate_metrics_from_residuals(residuals[mask_a])
     metrics_b = calculate_metrics_from_residuals(residuals[~mask_a])
 
@@ -409,6 +439,8 @@ def permutation_test_categorical(
         bias_diff=metrics_a.bias - metrics_b.bias,
         variance_diff=metrics_a.variance - metrics_b.variance,
         group_a_values=frozenset(best_group),
+        covariate_type="categorical", method="permutation",
+        min_samples=min_samples, n_permutations=n_permutations,
     )
 
 # Tell pytest this isn't a test function, despite the ``test_`` prefix.
