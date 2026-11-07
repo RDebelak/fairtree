@@ -1,5 +1,9 @@
 # Validation of the November 2026 audit fixes
 
+The subsequent ordered permutation search optimization has a separate
+[paired simulation and timing report](ORDERED_OPTIMIZATION.md). Its baseline
+is the merged audit fixes documented here, not the earlier uploaded code.
+
 These checks address the identified implementation defects. They are not a
 rerun of the publication's full simulation studies or a general guarantee of
 calibration under arbitrary error distributions or adaptive tree selection.

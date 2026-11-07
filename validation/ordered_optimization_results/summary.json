@@ -1,0 +1,275 @@
+{
+  "config": {
+    "replications": 100,
+    "permutations": 99,
+    "sample_sizes": [
+      100,
+      300
+    ],
+    "tree_replications": 10,
+    "seed": 20261107
+  },
+  "environment": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scipy": "1.17.0",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+    "cpu_count": 9,
+    "baseline_commit": "1e8fb49b022fa4c964fbc36e9e93d952c8badca6",
+    "checkout_commit": "1e8fb49b022fa4c964fbc36e9e93d952c8badca6",
+    "file_sha256": {
+      "fairtree/permutation.py": "cc676c012ee90640227373f91d1f2ce1fe7759be01e3966cce6467c7d94aa736",
+      "fairtree/_ordered.py": "401f7a7ed06a67713b5590f75de22d6b0c1aad5093c0263f0f707942ee0da183",
+      "validation/_ordered_reference.py": "adccb537aee45de79d036d62762f044402cea5196f08730b214a33cb1abe69d7",
+      "validation/compare_ordered_optimization.py": "df52f49852b6d7b96870326e6ba70d2923a98c133b35e93c2c3f43cee141a261"
+    }
+  },
+  "pairs": 1600,
+  "errors": 0,
+  "cells": [
+    {
+      "scenario": "continuous_equal_mse",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 2,
+      "rejections_optimized": 2,
+      "rate": 0.02,
+      "wilson_95": [
+        0.00550196755016235,
+        0.07001179072854391
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_equal_mse",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 3,
+      "rejections_optimized": 3,
+      "rate": 0.03,
+      "wilson_95": [
+        0.010254524024038925,
+        0.08451936429052762
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_heavy_null",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 3,
+      "rejections_optimized": 3,
+      "rate": 0.03,
+      "wilson_95": [
+        0.010254524024038925,
+        0.08451936429052762
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_heavy_null",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 5,
+      "rejections_optimized": 5,
+      "rate": 0.05,
+      "wilson_95": [
+        0.021543679154367973,
+        0.11175046923191914
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_mean",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 6,
+      "rejections_optimized": 6,
+      "rate": 0.06,
+      "wilson_95": [
+        0.027786123963188185,
+        0.1247681544589592
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_mean",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 6,
+      "rejections_optimized": 6,
+      "rate": 0.06,
+      "wilson_95": [
+        0.027786123963188185,
+        0.1247681544589592
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_multiregion",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 100,
+      "rejections_optimized": 100,
+      "rate": 1.0,
+      "wilson_95": [
+        0.9630065017930143,
+        1.0
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_multiregion",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 100,
+      "rejections_optimized": 100,
+      "rate": 1.0,
+      "wilson_95": [
+        0.9630065017930143,
+        1.0
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_null",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 5,
+      "rejections_optimized": 5,
+      "rate": 0.05,
+      "wilson_95": [
+        0.021543679154367973,
+        0.11175046923191914
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_null",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 4,
+      "rejections_optimized": 4,
+      "rate": 0.04,
+      "wilson_95": [
+        0.01566330399154762,
+        0.0983707143588792
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_variance",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 21,
+      "rejections_optimized": 21,
+      "rate": 0.21,
+      "wilson_95": [
+        0.14165654061915306,
+        0.29979968834089865
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "continuous_variance",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 8,
+      "rejections_optimized": 8,
+      "rate": 0.08,
+      "wilson_95": [
+        0.04109346148438061,
+        0.14998107700948735
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "ordinal_null",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 4,
+      "rejections_optimized": 4,
+      "rate": 0.04,
+      "wilson_95": [
+        0.01566330399154762,
+        0.0983707143588792
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "ordinal_null",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 0,
+      "rejections_optimized": 0,
+      "rate": 0.0,
+      "wilson_95": [
+        0.0,
+        0.03699349820698568
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "ordinal_variance",
+      "n": 100,
+      "pairs": 100,
+      "rejections_baseline": 76,
+      "rejections_optimized": 76,
+      "rate": 0.76,
+      "wilson_95": [
+        0.6676766365018553,
+        0.8330867444305122
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    },
+    {
+      "scenario": "ordinal_variance",
+      "n": 300,
+      "pairs": 100,
+      "rejections_baseline": 100,
+      "rejections_optimized": 100,
+      "rate": 1.0,
+      "wilson_95": [
+        0.9630065017930143,
+        1.0
+      ],
+      "result_mismatches": 0,
+      "statistic_mismatches": 0,
+      "rng_mismatches": 0
+    }
+  ],
+  "tree_pairs": 160,
+  "tree_mismatches": 0,
+  "tree_pairs_with_splits": 35
+}

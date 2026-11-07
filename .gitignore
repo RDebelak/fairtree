@@ -45,3 +45,7 @@ htmlcov/
 # Documentation builds
 docs/_build/
 site/
+
+# Local optimization validation runs; committed results live in a separate folder.
+validation/ordered_optimization_run/
+validation/ordered_optimization_results/pairs.jsonl
