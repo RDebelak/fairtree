@@ -14,6 +14,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+from ._ordered import OrderedSplitSearch
 from .metrics import (
     SplitResult,
     calculate_metrics_from_residuals,
@@ -188,37 +189,7 @@ def _find_best_split_statistic(
     -------
     (best_split_value, max_abs_diff, n_left_at_best_split)
     """
-    ordered_unique = np.unique(covariate_values)
-    if len(ordered_unique) < 2:
-        return None, 0.0, 0
-
-    lower, upper = ordered_unique[:-1], ordered_unique[1:]
-    midpoints = lower / 2.0 + upper / 2.0
-    unique_splits = np.where((midpoints >= lower) & (midpoints < upper), midpoints, lower)
-    if max_splits is not None and max_splits > 0 and len(unique_splits) > max_splits:
-        indices = np.linspace(0, len(unique_splits) - 1, max_splits).round().astype(int)
-        unique_splits = np.unique(unique_splits[indices])
-
-    best_split = None
-    best_diff = -np.inf
-    best_n_left = 0
-
-    for split in unique_splits:
-        mask_left = covariate_values <= split
-        n_left = int(mask_left.sum())
-        n_right = len(covariate_values) - n_left
-        if n_left < min_samples or n_right < min_samples:
-            continue
-
-        mse_left = float(np.mean(mse_values[mask_left]))
-        mse_right = float(np.mean(mse_values[~mask_left]))
-        diff = abs(mse_left - mse_right)
-        if diff > best_diff:
-            best_diff = diff
-            best_split = float(split)
-            best_n_left = n_left
-
-    return best_split, best_diff if best_split is not None else 0.0, best_n_left
+    return OrderedSplitSearch(covariate_values, min_samples, max_splits).best(mse_values)
 
 
 def permutation_test_continuous(
@@ -240,7 +211,10 @@ def permutation_test_continuous(
     dataset. This correction is what the "maximally selected statistic"
     problem demands: simply permuting at a fixed observed split would
     underestimate the null tail and inflate the rejection rate.
-    The current mask-based search costs ``O(n * n_splits * n_permutations)``.
+    Cached covariate ordering and cumulative sums cost
+    ``O(n log n + n * n_permutations)`` in the usual case. Numerically
+    ambiguous maxima or permutation comparisons use direct group means
+    to preserve the reference decisions; these fallbacks can cost more.
 
     For an ``O(n log n)`` alternative, use
     :class:`fairtree.FairTreeFluctuationTest`.
@@ -282,25 +256,20 @@ def permutation_test_continuous(
     aligned(covariate_values, residuals)
     mse_values = squared(residuals)
 
-    best_split, obs_max_diff, _ = _find_best_split_statistic(
-        covariate_values, mse_values, min_samples, max_splits=max_splits
-    )
+    search = OrderedSplitSearch(covariate_values, min_samples, max_splits)
+    best_split, obs_max_diff, _ = search.best(mse_values)
     if best_split is None:
         return None
 
-    perm_max_diffs = np.empty(n_permutations)
-    for i in range(n_permutations):
+    # Preserve the reference residual permutations and their RNG consumption.
+    threshold = obs_max_diff - 100 * np.finfo(float).eps * obs_max_diff
+    hits = 0
+    for _ in range(n_permutations):
         shuffled = rng.permutation(residuals)
-        _, perm_max, _ = _find_best_split_statistic(
-            covariate_values, shuffled ** 2, min_samples, max_splits=max_splits
-        )
-        perm_max_diffs[i] = perm_max
+        hits += search.exceeds(shuffled ** 2, threshold)
 
-    # + 1 smoothing: hits + 1 in numerator, n_perm + 1 in denominator
-    p_value = float(
-        (np.sum(perm_max_diffs >= obs_max_diff - 100 * np.finfo(float).eps * obs_max_diff) + 1)
-        / (n_permutations + 1)
-    )
+    # Unchanged maximally-selected tail event and +1 Monte Carlo correction.
+    p_value = float((hits + 1) / (n_permutations + 1))
 
     mask_left = covariate_values <= best_split
     metrics_a = calculate_metrics_from_residuals(residuals[mask_left])

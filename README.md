@@ -123,8 +123,12 @@ splits consider all boundaries between unique values by default. Unordered
 categories are sorted by mean squared loss and adjacent partitions are tested.
 Every random permutation repeats the entire selection procedure, including
 category ordering. All paths use `(hits + 1)/(B + 1)`, so randomized p-values
-are never zero. Exchangeability under the null is required. The current
-mask-based continuous search costs O(n × number of splits × B).
+are never zero. Exchangeability under the null is required. The ordered
+permutation search caches the covariate ordering and uses cumulative sums,
+usually costing O(n log n + B × n). Direct recomputation safeguards numerical
+ties; degenerate cases can retain the former O(B × n × number of splits) cost.
+See the [optimization and paired simulation report](validation/ORDERED_OPTIMIZATION.md)
+for the unchanged statistical rules, numerical safeguards, and measured timings.
 
 The two methods target different features of prediction error. Equal squared
 errors can conceal opposite signed biases; the permutation MSE test is not an

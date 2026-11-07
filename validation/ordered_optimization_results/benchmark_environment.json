@@ -1,0 +1,16 @@
+{
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "pandas": "2.2.3",
+  "scipy": "1.17.0",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+  "cpu_count": 9,
+  "baseline_commit": "1e8fb49b022fa4c964fbc36e9e93d952c8badca6",
+  "checkout_commit": "1e8fb49b022fa4c964fbc36e9e93d952c8badca6",
+  "file_sha256": {
+    "fairtree/permutation.py": "cc676c012ee90640227373f91d1f2ce1fe7759be01e3966cce6467c7d94aa736",
+    "fairtree/_ordered.py": "401f7a7ed06a67713b5590f75de22d6b0c1aad5093c0263f0f707942ee0da183",
+    "validation/_ordered_reference.py": "adccb537aee45de79d036d62762f044402cea5196f08730b214a33cb1abe69d7",
+    "validation/compare_ordered_optimization.py": "df52f49852b6d7b96870326e6ba70d2923a98c133b35e93c2c3f43cee141a261"
+  }
+}
