@@ -1,25 +1,15 @@
 # FairTree
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+Subgroup fairness auditing of machine learning models with bias–variance decomposition.
 
-Subgroup fairness auditing of machine learning models, with bias–variance
-decomposition of detected disparities.
+FairTree tests whether prediction errors vary across continuous, ordinal,
+binary, and unordered categorical covariates. It can fit an exploratory tree
+by repeating the tests within each child node, including repeated splits on
+the same predictor.
 
-FairTree scans covariates of mixed type for subgroups where a model's
-prediction error changes systematically — by mean (bias), by spread
-(variance), or both. The method adapts Rasch-tree recursive partitioning
-from psychometrics. Two statistical variants are provided: a score-based
-fluctuation test based on the Brownian bridge, and a non-parametric
-permutation test with proper correction for the maximally-selected
-statistic.
-
-**Reference paper.** Debelak (2026), *FairTree: Subgroup Fairness
-Auditing of Machine Learning Models with Bias–Variance Decomposition.*
-Accepted at the 2026 ACM Conference on Fairness, Accountability, and
-Transparency (FAccT '26). https://arxiv.org/abs/2604.19357
-
----
+Reference: Debelak (2026), *FairTree: Subgroup Fairness Auditing of Machine
+Learning Models with Bias–Variance Decomposition*, ACM FAccT 2026.
+[Published paper](https://doi.org/10.1145/3805689.3812354).
 
 ## Installation
 
@@ -27,177 +17,202 @@ Transparency (FAccT '26). https://arxiv.org/abs/2604.19357
 pip install fairtree
 ```
 
-Dependencies: NumPy, pandas, SciPy, matplotlib. Python 3.10+.
+For the development version, install from your checked-out repository:
 
----
+```bash
+pip install -e ".[dev]"
+```
 
-## Quickstart
+Python 3.10+; NumPy, pandas, SciPy, and matplotlib. The recursive fitting API
+below is part of the development version; it is not a claim that an updated
+release has already been published on PyPI.
 
-Audit a trained classifier by checking whether its residuals shift
-systematically across each covariate:
+## Fit and plot a tree
+
+This complete synthetic example can be replaced with predictions on your own
+independent audit/test set. Rows must align positionally; pandas index labels
+are not used for alignment.
 
 ```python
 import numpy as np
 import pandas as pd
-from fairtree import test_mixed_covariates, build_fairtree, draw_fairtree
+from fairtree import fit_fairtree, draw_fairtree
 
-# You provide: predictions on the audit set, ground truth, and covariates.
+rng = np.random.default_rng(42)
+n = 600
 covariates = pd.DataFrame({
-    "age":    age_values,
-    "hours":  hours_values,
-    "region": region_values,   # unordered string labels
-    "sex":    sex_values,      # two-level
+    "age": rng.uniform(18, 70, n),
+    "region": rng.choice(["North", "South", "East"], n),
 })
-y_true = ...                   # shape (n,)
-y_pred = ...                   # shape (n,) — e.g. predicted probabilities
+y_true = rng.normal(size=n)
+y_pred = y_true + rng.normal(0, 0.3, n) + 0.8 * (covariates["age"].to_numpy() > 40)
 
-results = test_mixed_covariates(
+tree = fit_fairtree(
     covariates,
-    covariate_types={
-        "age":    "continuous",
-        "hours":  "continuous",
-        "region": "categorical",
-        "sex":    "binary",
-    },
-    y_true=y_true,
-    y_pred=y_pred,
-    method="fluctuation",   # or "permutation"
-    correction="holm",      # or "bonferroni", "fdr_bh"
+    {"age": "continuous", "region": "categorical"},
+    y_true, y_pred,
+    method="fluctuation",          # alternatively "permutation"
+    correction="bonferroni",       # manuscript choice; default is "holm"
     alpha=0.05,
+    min_samples=10,                 # minimum per child
+    min_samples_split=20,           # minimum node size before testing
+    max_depth=None,                 # continue until statistical/size stopping
+    rng=np.random.default_rng(0),
 )
 
-for r in results:
-    print(f"{r.covariate:8s}  p_adj={r.corrected_p_value:.4f}  "
-          f"detected={r.detected_issue}")
-
-# Post-hoc tree of the significant splits
-residuals = y_pred - y_true
-tree = build_fairtree(covariates, residuals, results, max_depth=2,
-                      exclude=["region"])   # categorical: table only, no tree
-draw_fairtree(tree, save_path="fairtree.png")
+for result in tree.test_results:    # root tests; each child has its own tests
+    print(result.covariate, result.corrected_p_value, result.detected_issue)
+draw_fairtree(tree, save_path="fairtree.png", show=False)
 ```
 
----
+`TreeNode.split_result` records the accepted split and its testing settings.
+`sample_indices` identifies rows in the original fitting data. Every child is
+retested on its own observations. A previously used predictor remains eligible
+for further splits. A node stops when its depth/size limit is reached or none
+of its admissible covariates is significant after adjustment.
 
-## Algorithm overview
+## Test covariates without growing a tree
 
-### Two test variants
+```python
+from fairtree import test_mixed_covariates, build_fairtree
 
-**Fluctuation test (default, recommended).** A score-based test that
-scans for an unknown break point along the ordered covariate. Applies
-the Brownian bridge transformation to the cumulative sum of residuals
-and compares the supremum statistic against Kolmogorov's two-sided
-limit. Separate sub-tests detect shifts in bias (mean residual) and in
-variance (squared centered residual); they are combined with Bonferroni.
-Complexity is O(n log n).
+results = test_mixed_covariates(
+    covariates, {"age": "continuous", "region": "categorical"},
+    y_true, y_pred, correction="bonferroni",
+)
+for result in results:
+    print(result.p_value, result.corrected_p_value,
+          result.raw_is_significant, result.is_significant)
 
-**Permutation test.** A non-parametric alternative that finds the split
-maximizing the between-group MSE difference, then builds the null
-distribution by re-optimizing the split within each permuted sample.
-For continuous and ordinal covariates, all split points between
-consecutive unique values are considered by default. For unordered
-categorical covariates, categories are ordered by mean loss and the
-CART-style partitions along that order are evaluated. This handles the
-maximally-selected statistic problem. Complexity is
-O(n_splits × n_permutations). Recommended for small samples or as a
-confirmatory test.
+# Existing calling style: reuse these root tests, then retest every child.
+tree = build_fairtree(covariates, y_pred - y_true, results, max_depth=None)
+```
 
-### Bias–variance decomposition
+`is_significant` and `detected_issue` now use **adjusted** significance.
+`raw_is_significant` preserves the pre-adjustment decision. Fluctuation
+`bias_significant` and `variance_significant` are per-covariate diagnostic flags
+at `alpha/2`; they do not claim simultaneous component-level control across
+all covariates. `primary_issue` uses the supplied alpha and returns `neither`
+when the adjusted covariate test fails. Permutation issue labels are heuristic.
 
-At each detected split, FairTree reports bias (mean of residuals) and
-variance (residual variance) on each side, letting users distinguish
-between "the model systematically under- or over-predicts for this
-subgroup" (a bias shift) and "the model is less reliable for this
-subgroup" (a variance shift). The ``detected_issue`` field on each
-result is one of ``"None"``, ``"Bias"``, ``"Variance"``, or ``"Both"``.
+When reusing root results, use the same observations and testing settings.
+Configuration conflicts are rejected. Recompute cached results from older
+versions that lack the required fitting metadata. `build_fairtree` retains
+its default maximum depth of 2; `fit_fairtree` defaults to unlimited depth.
 
-### Supported covariate types
+## Statistical methods and covariate handling
 
-| Type          | Fluctuation | Permutation |
-|---------------|:-----------:|:-----------:|
-| `continuous`  | ✓           | ✓           |
-| `ordinal`     | ✓           | ✓           |
-| `binary`      | ✓           | ✓           |
-| `categorical` | ✓           | ✓           |
+**Fluctuation:** tests centered residual cumulative sums for bias and squared
+conditionally centered residual cumulative sums for variance. It uses the
+Kolmogorov full-bridge reference and combines the two p-values with Bonferroni.
+If the bias p-value is below alpha, variance centering uses group means at the
+selected bias boundary; otherwise it uses the global mean. The original
+small-n adjustment for n < 50 is retained as a heuristic.
 
-For unordered categorical covariates, FairTree uses **sample splitting**:
-the category ordering is learned on a 50% training half and the
-fluctuation test is run on the held-out test half. This prevents the
-same data from being used to both order the categories and test for a
-shift along that order, which would otherwise inflate the Type I error.
-For the permutation path, unordered categories use the CART-style
-partitioning approach described in the paper.
+The maximum and conditional centering are now restricted to **boundaries
+between distinct covariate values**, with enough observations on both sides.
+A binary predictor has one boundary. A constant predictor has none. The
+full-bridge reference is conservative for the restricted supremum under the
+bridge null, particularly for binary/ordinal predictors. This is an asymptotic
+approximation, not an exact finite-sample guarantee or a new frequency-adjusted
+ordinal test. Conditional variance centering remains a heuristic requiring
+further evaluation in complex mean/variance patterns.
 
-### Multiple-testing correction
+**Permutation:** tests the absolute difference in mean squared errors. Numeric
+splits consider all boundaries between unique values by default. Unordered
+categories are sorted by mean squared loss and adjacent partitions are tested.
+Every random permutation repeats the entire selection procedure, including
+category ordering. All paths use `(hits + 1)/(B + 1)`, so randomized p-values
+are never zero. Exchangeability under the null is required. The current
+mask-based continuous search costs O(n × number of splits × B).
 
-Holm–Bonferroni (default), plain Bonferroni, and Benjamini–Hochberg
-corrections are applied across covariates. The per-covariate significance
-flag (`is_significant`) uses the uncorrected p-value against `alpha`;
-`corrected_p_value` reflects the family-wise correction.
+The two methods target different features of prediction error. Equal squared
+errors can conceal opposite signed biases; the permutation MSE test is not an
+interchangeable test of signed mean and variance equality.
 
----
+| Declared type | Representation | Fluctuation treatment |
+|---|---|---|
+| `continuous` | Finite numeric values | Eligible distinct-value boundaries |
+| `ordinal` | Finite numeric ordered codes | Eligible level boundaries |
+| `binary` | Two original numeric/string labels | Actual group boundary |
+| `categorical` | Hashable labels | Actual boundary for two levels; held-out ordering for more levels |
+
+For multi-level unordered categories, 50% of rows learn the mean-residual
+ordering and the remaining 50% are tested. The default split seed is 0 and
+is independent of outcomes. A supplied RNG produces reproducible random fold
+seeds. Reordering rows can change fold membership even with a fixed seed.
+A category absent from the ordering half gets the middle learned rank; this
+same mapping is used in testing, metrics, names, and tree routing.
+
+`n_a`, `n_b`, and error metrics describe the **full node**. `test_n`, `test_n_a`,
+`test_n_b`, `test_indices`, and `split_seed` describe the actual test sample.
+Test indices are positional within the current node's rows. Category partitions
+are stored in `group_a_values`, including levels assigned a fallback rank.
+
+## Stopping, inputs, and inference limits
+
+- `min_samples` means minimum **child** size for every method/type. If omitted,
+  it is 10 for fluctuation tests and 1 for permutation tests. For categorical
+  sample splitting it is enforced on each child of the held-out half, which
+  also ensures the full-data children meet that size.
+- `min_samples_split` is the minimum **node** size before testing, defaulting
+  to twice the child minimum. Both node and child constraints must hold.
+- Ineligible covariates contribute p=1 to the requested correction family and
+  are omitted from the returned result list. Low-level permutation split
+  routines return `None` when no admissible split exists.
+- Responses/residuals must be aligned, finite, one-dimensional numeric arrays.
+  Integer inputs are converted to floating point before arithmetic. Missing
+  values, nonfinite values, and incompatible shapes are rejected explicitly.
+- Multiple response dimensions require a deliberate observation-level adapter.
+  Averaging squared residuals is not the same as squaring their average;
+  flattening correlated responses changes the sampling unit.
+- Holm and Bonferroni adjust within each node. BH adjusts FDR rather than FWER.
+  None of these node-wise rules alone establishes a general family-wise error
+  guarantee over the full adaptively selected tree. Child p-values and group
+  metrics should be interpreted in this exploratory context.
 
 ## Public API
 
-Top-level functions (import from `fairtree`):
+- `fit_fairtree(df, types, y_true, y_pred, ...)`: fit a recursive tree.
+- `build_fairtree(df, residuals, results=None, ..., covariate_types=...)`:
+  residual-based fitting, optionally reusing only the root tests.
+- `test_mixed_covariates(df, types, y_true, y_pred, ...)`: mixed-covariate tests.
+- `draw_fairtree(root, ...)`: render a fitted tree.
+- `FairTreeFluctuationTest(alpha=.05, min_samples=10).test(...)`: ordered test
+  with full diagnostic processes and eligible boundary indices.
+- `score_based_test_from_residuals(a, b, alpha=.05, min_samples=10)`:
+  fluctuation test at a known two-group boundary.
+- `permutation_test(a, b, ...)`, `test_single_binary_covariate(...)`,
+  `permutation_test_continuous(...)`, `permutation_test_categorical(...)`.
+- `prepare_categorical_sample_split(...)`, `prepare_categorical_for_testing(...)`.
+- `bonferroni`, `holm_bonferroni`, `benjamini_hochberg`, `correct_p_values`,
+  `holm_stepdown_decisions`.
 
-- `test_mixed_covariates(df, types, y_true, y_pred, *, method, correction, alpha, ...)` —
-  dispatcher over covariate types; returns `List[SplitResult]`.
-- `build_fairtree(df, residuals, results, max_depth=2, exclude=None)` —
-  build a post-hoc tree from `SplitResult` outputs.
-- `draw_fairtree(root, figsize, save_path, title, show)` — render.
+## Development and validation
 
-Lower-level entry points:
+```bash
+pytest -q
+ruff check fairtree/ tests/
+python -m build
+```
 
-- `FairTreeFluctuationTest(alpha).test(cov, y_true, y_pred, covariate_name)` —
-  direct access to the score-based test with full diagnostic arrays
-  (returns `FluctuationTestResult`).
-- `permutation_test_continuous(cov, y_true, y_pred, ...)` — permutation
-  test for one continuous or ordinal covariate.
-- `permutation_test_categorical(cov, y_true, y_pred, ...)` — permutation
-  test for one unordered categorical covariate.
-- `test_single_binary_covariate(cov, residuals, ...)` — permutation test
-  for one binary covariate.
-- `score_based_test_from_residuals(r_a, r_b, alpha)` — two-group
-  fluctuation test with a known split.
-- `prepare_categorical_sample_split(cov, residuals, seed)` — explicit
-  access to the sample-splitting utility.
+See [CHANGELOG.md](CHANGELOG.md) for intentional behaviour changes and
+[validation/README.md](validation/README.md) for the bounded calibration checks.
+These checks are not a full rerun of the published simulation studies.
 
-Corrections:
-`bonferroni`, `holm_bonferroni`, `benjamini_hochberg`, `correct_p_values`,
-`holm_stepdown_decisions`.
-
----
-
-## Limitations (v0.1)
-
-- `build_fairtree` recursively organizes already-computed
-  `SplitResult` outputs. It does not yet re-run the statistical tests
-  inside each child node.
-- Permutation tests for continuous covariates consider all unique split
-  points by default. For very large samples, use `max_splits` on the
-  lower-level function if an explicit speed approximation is acceptable.
-
----
-
-## Citation
-
-Once the preprint is posted, please cite:
+## Citation and license
 
 ```bibtex
 @inproceedings{debelak2026fairtree,
-  author    = {Debelak, Rudolf},
-  title     = {{FairTree}: Subgroup Fairness Auditing of Machine Learning
-               Models with Bias--Variance Decomposition},
+  author = {Debelak, Rudolf},
+  title = {{FairTree}: Subgroup Fairness Auditing of Machine Learning
+           Models with Bias--Variance Decomposition},
   booktitle = {Proceedings of the 2026 ACM Conference on Fairness,
-               Accountability, and Transparency (FAccT '26)},
-  year      = {2026},
+               Accountability, and Transparency},
+  year = {2026},
   publisher = {ACM},
+  doi = {10.1145/3805689.3812354}
 }
 ```
 
----
-
-## License
-
-Apache License 2.0. See [`LICENSE`](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

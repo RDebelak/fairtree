@@ -1,0 +1,64 @@
+{
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "pandas": "2.2.3",
+  "scipy": "1.17.0",
+  "seed": 20261107,
+  "note": "Exploratory root/test calibration under iid normal residuals, not whole-tree FWER.",
+  "ten_continuous_covariates_n200": {
+    "raw_flags": {
+      "rejections": 312,
+      "trials": 1000,
+      "rate": 0.312,
+      "wilson_95": [
+        0.2840496860924683,
+        0.3413891750981004
+      ]
+    },
+    "adjusted_rejections": {
+      "rejections": 33,
+      "trials": 1000,
+      "rate": 0.033,
+      "wilson_95": [
+        0.0235929279584269,
+        0.04598126446708158
+      ]
+    },
+    "tree_splits": {
+      "rejections": 33,
+      "trials": 1000,
+      "rate": 0.033,
+      "wilson_95": [
+        0.0235929279584269,
+        0.04598126446708158
+      ]
+    }
+  },
+  "binary_n200": {
+    "rejections": 3,
+    "trials": 1000,
+    "rate": 0.003,
+    "wilson_95": [
+      0.0010207838811386186,
+      0.008783014053503173
+    ]
+  },
+  "ordinal_n200": {
+    "rejections": 8,
+    "trials": 1000,
+    "rate": 0.008,
+    "wilson_95": [
+      0.004059195818806101,
+      0.01570633453098014
+    ]
+  },
+  "categorical_n200": {
+    "rejections": 10,
+    "trials": 1000,
+    "rate": 0.01,
+    "wilson_95": [
+      0.00544075444552925,
+      0.018309468870314774
+    ]
+  }
+}

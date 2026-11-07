@@ -9,10 +9,13 @@ import pytest
 
 matplotlib.use("Agg")
 
+import matplotlib.pyplot as plt  # noqa: E402
+
 from fairtree import (  # noqa: E402
     TreeNode,
     build_fairtree,
     draw_fairtree,
+    fit_fairtree,
     test_mixed_covariates,
 )
 
@@ -117,3 +120,22 @@ def test_draw_fairtree_root_only_tree(results_and_data, tmp_path):
     save_path = tmp_path / "root_only.png"
     draw_fairtree(root, save_path=str(save_path), show=False)
     assert save_path.exists()
+
+
+def test_deep_recursive_tree_boxes_fit_inside_axes():
+    x = np.arange(500)
+    r = np.repeat([0., 1., 3., 6., 10.], 100)
+    r += np.random.default_rng(42).normal(0, .05, 500)
+    root = fit_fairtree(pd.DataFrame({"x": x}), {"x": "continuous"}, np.zeros(500), r)
+    assert root.left_child.left_child.left_child.depth == 3
+    fig = draw_fairtree(root, show=False)
+    try:
+        fig.canvas.draw()
+        ax = fig.axes[0]
+        assert len(ax.patches) == 9  # five leaves and four internal nodes
+        for patch in ax.patches:
+            bounds = patch.get_window_extent()
+            assert ax.bbox.contains(bounds.x0, bounds.y0)
+            assert ax.bbox.contains(bounds.x1, bounds.y1)
+    finally:
+        plt.close(fig)

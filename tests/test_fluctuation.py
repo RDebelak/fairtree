@@ -182,8 +182,8 @@ def test_sample_split_different_seed_gives_different_split():
     assert not np.array_equal(t1[2], t2[2])
 
 
-def test_sample_split_default_seed_is_content_derived():
-    """With seed=None, identical inputs produce identical splits."""
+def test_sample_split_default_seed_is_reproducible():
+    """With seed=None, fixed seed 0 reproduces the split for fixed row order."""
     rng = np.random.default_rng(0)
     cov = rng.choice(["a", "b"], 50)
     residuals = rng.normal(0, 1, 50)

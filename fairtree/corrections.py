@@ -16,6 +16,8 @@ from typing import List, Sequence, Tuple
 
 import numpy as np
 
+from ._validation import alpha_level, p_values as validate_p_values
+
 
 __all__ = [
     "bonferroni",
@@ -40,7 +42,7 @@ def bonferroni(p_values: Sequence[float]) -> np.ndarray:
     np.ndarray
         Corrected p-values, capped at 1.
     """
-    p = np.asarray(p_values, dtype=float)
+    p = validate_p_values(p_values)
     return np.minimum(p * len(p), 1.0)
 
 
@@ -62,7 +64,7 @@ def holm_bonferroni(p_values: Sequence[float]) -> np.ndarray:
     np.ndarray
         Adjusted p-values in the original order.
     """
-    p = np.asarray(p_values, dtype=float)
+    p = validate_p_values(p_values)
     n = len(p)
     if n == 0:
         return p
@@ -100,7 +102,7 @@ def benjamini_hochberg(p_values: Sequence[float]) -> np.ndarray:
     np.ndarray
         BH-adjusted p-values in the original order.
     """
-    p = np.asarray(p_values, dtype=float)
+    p = validate_p_values(p_values)
     n = len(p)
     if n == 0:
         return p
@@ -142,6 +144,8 @@ def correct_p_values(
     ValueError
         If ``method`` is not recognized.
     """
+    if not isinstance(method, str):
+        raise ValueError("Unknown correction method: expected a string.")
     key = method.lower()
     if key == "bonferroni":
         return bonferroni(p_values)
@@ -181,7 +185,8 @@ def holm_stepdown_decisions(
         One tuple per test, sorted ascending by raw p-value. The
         ``original_index`` locates the test in the input sequence.
     """
-    p = np.asarray(p_values, dtype=float)
+    alpha = alpha_level(alpha)
+    p = validate_p_values(p_values)
     m = len(p)
     order = np.argsort(p)
 
